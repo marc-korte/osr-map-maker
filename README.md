@@ -2,30 +2,31 @@
 
 A single-page, old-school (TSR/B-X style) hex-wilderness and dungeon map editor.
 Pure static front end: `index.html` + a bundled `icons.js` (icons are inlined as
-data URIs). No backend, no database.
+data URIs). No backend, no database, no accounts — your maps live in your own
+browser.
+
+**▶ Live: https://marc-korte.github.io/osr-map-maker/**
+
+Each person who opens the link gets their own private workspace; maps are saved
+in that browser (localStorage) and via **Save .json** / **Load**. Nothing is
+stored server-side.
+
+## Layout
 
 ```
 index.html        # the app
 icons.js          # bundled icon set (base64) — built by maps/build_icons_js.py
-Dockerfile        # nginx:alpine serving the two files
-default.conf      # nginx: no-cache headers for the app shell
-compose.yaml      # local build + run on :8089
-deploy/
-  compose.truenas.yaml   # TrueNAS/Dockge: GHCR image + Tailscale sidecar
-  tailscale-serve.json   # Tailscale serve -> nginx
-.github/workflows/docker-publish.yml   # build + push image to GHCR on push to main
-maps/             # Python map generators + icon builder (dev tooling, not served)
+maps/             # Python icon/map generators (dev tooling, not part of the site)
+.github/workflows/
+  pages.yml       # deploys index.html + icons.js to GitHub Pages on push to main
 ```
 
 ## Develop locally
 
-Just open `index.html` in a browser, or run it through nginx exactly like prod:
+It's a static file — just open `index.html` in a browser. No build step, no
+server needed.
 
-```
-docker compose up --build      # http://localhost:8089
-```
-
-Editing the icon set:
+Editing the icon set (optional):
 
 ```
 cd maps
@@ -34,55 +35,33 @@ python3 gen_stairs.py          # tapered dungeon stair glyph
 python3 build_icons_js.py      # bundle icons/ -> ../icons.js
 ```
 
-## CI: build image to GHCR
+## Deploy (GitHub Pages)
 
-`.github/workflows/docker-publish.yml` builds and pushes
-`ghcr.io/marc-korte/osr-map-maker:latest` (and a `sha-xxxxxxx` tag) on every push to
-`main`. Uses the built-in `GITHUB_TOKEN` — no extra secrets.
+Hosting is GitHub Pages, set up and automatic:
 
-After the first successful run, make the package usable by the NAS:
-- GitHub → your profile → **Packages** → `osr-map-maker` → **Package settings**
-  → set visibility **Public** (simplest), **or** keep it private and
-  `docker login ghcr.io` on the NAS with a PAT that has `read:packages`.
+- Push to `main` → `.github/workflows/pages.yml` publishes `index.html` +
+  `icons.js` to the Pages CDN. No Docker, no server, no secrets.
+- Pages is configured as **Settings → Pages → Source: GitHub Actions**.
 
-## Deploy on TrueNAS SCALE (Dockge)
+So the whole update loop is just: **edit `index.html` → commit → push.** The live
+site updates in ~a minute. (A hard refresh / Ctrl-Shift-R bypasses browser cache.)
 
-1. **Dataset** (TrueNAS UI → Datasets → Add, under your pool):
-   `/mnt/Pool-0/osr-map-maker`. Copy `deploy/tailscale-serve.json` into it.
-2. **Stack** in Dockge: new stack `osr-map-maker`, paste
-   `deploy/compose.truenas.yaml` (image already set to `ghcr.io/marc-korte/...`).
-3. Set `TS_AUTHKEY` in the stack env (Dockge env editor or a `.env` in the stack
-   folder) — a Tailscale reusable/ephemeral auth key.
-4. **Deploy.** Reach it at `https://osr-map-maker.<your-tailnet>.ts.net`
-   (Tailscale provisions the TLS cert). LAN-only instead: drop the `tailscale`
-   service and uncomment the `web` `ports:` block (`http://<NAS-IP>:8089`).
+### Custom domain (optional)
 
-### Update loop
+Add a `CNAME` file containing your domain (e.g. `maps.example.com`), point a DNS
+`CNAME` at `marc-korte.github.io`, and set the domain under Settings → Pages.
 
-Edit → commit → push `main`. Actions rebuilds `:latest`. Then either:
-- In Dockge, **Pull** the stack image and **Up**, or
-- Uncomment the `watchtower` service in the deploy compose to auto-pull
-  (default every 5 min).
+## Optional: self-host with Docker
 
-## Alternative: build on the NAS from git (no CI, no registry)
+Not needed — Pages covers it — but the repo still ships an nginx setup if you ever
+want a private instance (e.g. on a NAS):
 
-Skip GHCR entirely — point compose at the repo and let the NAS build it:
+- `Dockerfile` + `default.conf` — `nginx:alpine` serving the two files.
+- `compose.yaml` — `docker compose up --build` → http://localhost:8089
+- `deploy/compose.truenas.yaml` + `deploy/tailscale-serve.json` — Dockge/TrueNAS
+  stack pulling the GHCR image (`ghcr.io/marc-korte/osr-map-maker`, built by
+  `.github/workflows/docker-publish.yml`) behind a Tailscale sidecar.
 
-```yaml
-services:
-  web:
-    build: https://github.com/marc-korte/osr-map-maker.git#main
-    restart: unless-stopped
-    ports:
-      - "8089:80"
-```
-
-In Dockge use **rebuild** (with no cache) to pick up new commits. Simpler, but
-the NAS does the build each time and there's no image history.
-
-## Notes
-
-- Maps live in the browser (localStorage + **Save .json** / **Load**); nothing is
-  stored server-side, so the container is stateless and disposable.
-- `default.conf` sends `Cache-Control: no-cache` so a hard refresh always shows the
-  latest deploy.
+If you don't want any of that, the `Dockerfile`, `compose*.yaml`, `default.conf`,
+`deploy/`, and `docker-publish.yml` workflow can be deleted without affecting the
+Pages site.

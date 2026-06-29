@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+maps/_hexicons_sheet.png
+*_map.png
+.DS_Store

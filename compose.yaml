@@ -1,0 +1,10 @@
+# Local build + run (development on your workstation):
+#   docker compose up --build   ->   http://localhost:8089
+services:
+  web:
+    build: .
+    image: osr-map-maker:local
+    container_name: osr-map-maker
+    restart: unless-stopped
+    ports:
+      - "8089:80"

@@ -26,8 +26,8 @@
   .swatch.on{ border-color:var(--hl); box-shadow:0 0 0 2px var(--hl); }
   .swatch img{ max-width:100%; max-height:100%; pointer-events:none; }
   #filter{ width:100%; margin-top:6px; }
-  .canvaswrap{ flex:1; overflow:auto; background:#333; }
-  .canvaspad{ width:max-content; min-width:100%; box-sizing:border-box; padding:18px; display:flex; justify-content:center; align-items:flex-start; }
+  .canvaswrap{ flex:1; overflow:hidden; background:#333; }
+  .canvaspad{ width:100%; height:100%; padding:0; }
   canvas{ background:#fff; box-shadow:0 4px 24px rgba(0,0,0,.5); display:block; touch-action:none; }
   #zoomlbl{ min-width:52px; }
   footer{ background:var(--bar); padding:6px 12px; font-size:12px; color:#bbb; border-top:2px solid #000; }
@@ -62,12 +62,23 @@
 "use strict";
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
 const cwrap=document.querySelector('.canvaswrap');
-let zoom=1;
-function applyZoom(){ cv.style.width=(cv.width*zoom)+'px'; cv.style.height=(cv.height*zoom)+'px'; const l=document.getElementById('zoomlbl'); if(l)l.textContent=Math.round(zoom*100)+'%'; }
-function zoomAt(factor, clientX, clientY){ const nz=Math.max(0.04,Math.min(5,zoom*factor)); if(Math.abs(nz-zoom)<1e-4)return; const r=cv.getBoundingClientRect(); if(clientX==null){ const wr=cwrap.getBoundingClientRect(); clientX=wr.left+wr.width/2; clientY=wr.top+wr.height/2; } const lx=(clientX-r.left)/zoom, ly=(clientY-r.top)/zoom; zoom=nz; applyZoom(); const r2=cv.getBoundingClientRect(); cwrap.scrollLeft+=(r2.left+lx*zoom)-clientX; cwrap.scrollTop+=(r2.top+ly*zoom)-clientY; }
-function zoomReset(){ zoom=1; applyZoom(); }
-function zoomFit(){ const wr=cwrap.getBoundingClientRect(); zoom=Math.max(0.04,Math.min(5,Math.min((wr.width-44)/cv.width,(wr.height-44)/cv.height))); applyZoom(); cwrap.scrollTop=0; }
-function maybeFit(){ const wr=cwrap.getBoundingClientRect(); if(cv.width>wr.width-44||cv.height>wr.height-44) zoomFit(); }   // auto-fit when the map is bigger than the window
+// VIEWPORT RENDERING: the canvas fills only the visible window; we draw the map under a pan/zoom transform and
+// cull off-screen hexes. This keeps the backing store small (≈ window×dpr) so content is crisp at ANY zoom and
+// map size, instead of stretching one giant whole-map bitmap. panX/panY = logical coords at the viewport's top-left.
+let zoom=1, panX=0, panY=0;
+let LW=0,LH=0, cullRect=null;
+const DPR=()=>window.devicePixelRatio||1;
+function clampPan(){ const vw=cwrap.clientWidth/zoom, vh=cwrap.clientHeight/zoom, m=120;
+  panX = LW<=vw ? (LW-vw)/2 : Math.max(-m,Math.min(LW-vw+m,panX));
+  panY = LH<=vh ? (LH-vh)/2 : Math.max(-m,Math.min(LH-vh+m,panY)); }
+function applyZoom(){ const l=document.getElementById('zoomlbl'); if(l)l.textContent=Math.round(zoom*100)+'%'; }
+function zoomAt(factor, clientX, clientY){ const nz=Math.max(0.04,Math.min(8,zoom*factor)); if(Math.abs(nz-zoom)<1e-4)return; const r=cv.getBoundingClientRect(); if(clientX==null){ clientX=r.left+r.width/2; clientY=r.top+r.height/2; }
+  const lx=panX+(clientX-r.left)/zoom, ly=panY+(clientY-r.top)/zoom;     // keep the logical point under the cursor fixed
+  zoom=nz; panX=lx-(clientX-r.left)/zoom; panY=ly-(clientY-r.top)/zoom; render(); }
+function zoomReset(){ zoom=1; render(); }
+function zoomFit(){ if(!LW||!LH){render();} zoom=Math.max(0.02,Math.min(8,Math.min(cwrap.clientWidth/LW,cwrap.clientHeight/LH))); panX=0; panY=0; render(); }
+function maybeFit(){ if(LW*zoom>cwrap.clientWidth||LH*zoom>cwrap.clientHeight) zoomFit(); }
+function panBy(dxCss,dyCss){ panX-=dxCss/zoom; panY-=dyCss/zoom; render(); }   // dxCss/dyCss in CSS px
 const GRID='#c7c7c7', INK='#000', PAP='#fff', GREY='#dedede', WATERC='#c4c4c4';
 const SS=3;                 // export supersample -> 300 dpi when 100 logical px = 1 inch
 const PPI=100;              // logical pixels per inch
@@ -102,7 +113,7 @@ function snapPt(px,py,L){ if(!M.snap||M.mode!=='dun')return[px,py]; const c=L.ce
 function lyr(id){ const L=M.layers&&M.layers.find(x=>x.id===id); return L?(L.vis&&!(M.view==='player'&&L.gm)):true; }
 function og(o){ return !(M.view==='player'&&o&&o.gm); }
 function gmDot(g,x,y){ if(M.view==='gm'){ g.save(); g.fillStyle='#e11'; g.beginPath(); g.arc(x,y,4,0,7); g.fill(); g.restore(); } }
-let selLabel=-1;
+let selLabel=-1, selSite=-1;
 function tT(){ if(M.mode==='dun'){ return (sel>=0&&M.syms[sel]&&M.syms[sel].icon)?M.syms[sel]:stampT; }
   if(selHex&&M.hex[selHex]){ let h=M.hex[selHex]; if(typeof h==='string'){h={n:h,rot:0,fx:false,fy:false,inv:false};M.hex[selHex]=h;} return h; } return stampT; }
 function eraseNearestStroke(px,py){ const a=curDraws(); let bi=-1,bd=400; a.forEach((d,i)=>{for(const p of d.pts){const dd=(p[0]-px)**2+(p[1]-py)**2; if(dd<bd){bd=dd;bi=i;}}}); if(bi>=0)a.splice(bi,1); }
@@ -112,8 +123,8 @@ function undo(){ const s=undoStack.pop(); if(!s)return; Object.assign(M,JSON.par
 
 // ---------- geometry ----------
 function layout(){
-  if(M.mode==='wild'){ const size=WILD_HEX, hw=Math.sqrt(3)*size, ox=(cv.width-hw*(M.cols+0.5))/2+hw/2, oy=150+size; return {size,hw,ox,oy}; }
-  const cell=DUN_CELL, ox=(cv.width-cell*M.cols)/2, oy=150; return {cell,ox,oy};
+  if(M.mode==='wild'){ const size=WILD_HEX, hw=Math.sqrt(3)*size, ox=(LW-hw*(M.cols+0.5))/2+hw/2, oy=150+size; return {size,hw,ox,oy}; }
+  const cell=DUN_CELL, ox=(LW-cell*M.cols)/2, oy=150; return {cell,ox,oy};
 }
 function hcenter(c,r,L){ return [L.ox+L.hw*(c+0.5*(r&1)), L.oy+1.5*L.size*r]; }
 function hcorners(x,y,s){ const p=[]; for(let i=0;i<6;i++){const a=Math.PI/180*(60*i-30);p.push([x+s*Math.cos(a),y+s*Math.sin(a)]);} return p; }
@@ -139,6 +150,7 @@ function drawIconT(g,set,name,cx,cy,bw,bh,t){ const im=IMG[set][name]; if(!im||!
   g.restore(); }
 function fullGrid(g,x0,y0,x1,y1,cell){ g.strokeStyle='#bdbdbd'; g.lineWidth=0.6; for(let x=x0;x<=x1+0.1;x+=cell){g.beginPath();g.moveTo(x,y0);g.lineTo(x,y1);g.stroke();} for(let y=y0;y<=y1+0.1;y+=cell){g.beginPath();g.moveTo(x0,y);g.lineTo(x1,y);g.stroke();} }
 
+
 // ---------- furniture ----------
 function frame(g,W,H){ g.strokeStyle=INK;g.lineWidth=3;g.strokeRect(14,14,W-28,H-28);g.lineWidth=1.1;g.strokeRect(22,22,W-44,H-44); }
 function cartouche(g,cx,y,t){ const w=Math.max(360,t.length*18+120),h=52; g.fillStyle=PAP;g.fillRect(cx-w/2,y,w,h);g.strokeStyle=INK;g.lineWidth=2.2;g.strokeRect(cx-w/2,y,w,h);g.lineWidth=1;g.strokeRect(cx-w/2+5,y+5,w-10,h-10); txt(g,cx,y+27,t,22,true,INK); }
@@ -146,7 +158,28 @@ function compass(g,x,y){ disc(g,x,y,28,null,INK,1.6); poly(g,[[x,y-24],[x-8,y+5]
 function scalebar(g,x,y,unit,n,lab){ for(let i=0;i<n;i++){g.fillStyle=i%2?PAP:INK;g.fillRect(x+i*unit,y,unit,9);g.strokeStyle=INK;g.lineWidth=1;g.strokeRect(x+i*unit,y,unit,9);} txt(g,x+n*unit/2,y+22,lab,13,false,INK); }
 function fmtScale(v){ v=+v; if(!Number.isFinite(v)||v<=0)v=1; return (Math.round(v*100)/100).toString(); }
 function legendBox(g,x,y,title,rows){ const w=276,rh=40,h=58+rh*rows.length; g.fillStyle=PAP;g.fillRect(x,y,w,h);g.strokeStyle=INK;g.lineWidth=2;g.strokeRect(x,y,w,h);g.lineWidth=1;g.strokeRect(x+5,y+5,w-10,h-10); txt(g,x+w/2,y+28,title,16,true,INK); let yy=y+60; for(const[icon,label]of rows){ icon(x+38,yy); txt(g,x+70,yy,label,14,null,INK,'left'); yy+=rh; } }
-function haloTxt(g,x,y,t,bold,px){ if(!t)return; g.font=(bold?'bold ':'italic ')+px+'px '+(bold?'Arial':'Georgia,serif'); g.textAlign='center'; const w=g.measureText(t).width; g.fillStyle=PAP; g.fillRect(x-w/2-4,y-px*.7,w+8,px*1.4); txt(g,x,y,t,px,bold?true:false,INK); }
+function haloTxt(g,x,y,t,bold,px){ if(!t)return; g.font=(bold?'bold ':'italic ')+px+'px '+(bold?'Arial':'Georgia,serif'); g.textAlign='center'; g.textBaseline='middle';
+  g.save(); g.lineJoin='round'; g.miterLimit=2; g.strokeStyle=PAP; g.lineWidth=px*0.3; g.strokeText(t,x,y); g.restore();   // white glyph outline = transparent background, still legible over lakes/symbols
+  g.fillStyle=INK; g.fillText(t,x,y); }
+function boxesOverlap(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
+function labelBox(g,text,px,ax,ay){ g.font='italic '+px+'px Georgia,serif'; const w=g.measureText(text).width; return {x:ax-w/2-4, y:ay-px*0.7, w:w+8, h:px*1.4}; }
+// greedy label placement: each name takes the first candidate slot (below/above/offset) that doesn't collide
+// with an already-placed label, staying near its hex; nudged labels get a faint leader line back to the hex.
+function placeLabels(g,reqs,placed){
+  placed=placed||[];
+  reqs.sort((a,b)=> a.prio-b.prio || a.cy-b.cy);
+  for(const q of reqs){ const s=q.s, cands=[
+      [q.cx, q.cy+0.78*s,0], [q.cx, q.cy-0.72*s,0], [q.cx, q.cy+1.05*s,1], [q.cx, q.cy-1.0*s,1],
+      [q.cx+0.55*s, q.cy+0.78*s,1], [q.cx-0.55*s, q.cy+0.78*s,1] ];
+    let chosen=null, px=q.px;
+    for(const[ax,ay,nudged]of cands){ const box=labelBox(g,q.text,px,ax,ay); if(!placed.some(b=>boxesOverlap(box,b))){ chosen=[ax,ay,box,nudged]; break; } }
+    if(!chosen){ px=11; const ax=q.cx, ay=q.cy+0.74*s, box=labelBox(g,q.text,px,ax,ay); chosen=[ax,ay,box,0]; }   // last resort: shrink, keep below
+    const[ax,ay,box,nudged]=chosen; placed.push(box);
+    if(nudged){ g.save(); g.globalAlpha=0.45; g.strokeStyle=INK; g.lineWidth=0.8; g.beginPath(); g.moveTo(q.cx,q.cy+0.5*s); g.lineTo(ax, box.y); g.stroke(); g.restore(); }
+    if(q.sel){ g.save(); g.fillStyle='#c9a227'; g.globalAlpha=0.3; g.fillRect(box.x-1,box.y-1,box.w+2,box.h+2); g.restore(); }   // selected name: gold highlight
+    haloTxt(g,ax,ay,q.text,false,px);
+    if(q.sel){ g.save(); g.strokeStyle='#c9a227'; g.lineWidth=1.6; g.strokeRect(box.x-1,box.y-1,box.w+2,box.h+2); g.restore(); } }
+}
 function drawRoute(g,pts,style){ g.save(); g.setLineDash(style==='path'?[3,7]:[12,8]); g.strokeStyle=INK; g.lineWidth=style==='path'?1.6:2.8; g.beginPath(); pts.forEach((p,i)=>i?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1])); g.stroke(); g.restore(); }
 function smoothPath(g,pts){ g.beginPath(); g.moveTo(pts[0][0],pts[0][1]); if(pts.length===2){g.lineTo(pts[1][0],pts[1][1]);return;} for(let i=1;i<pts.length-1;i++){ const mx=(pts[i][0]+pts[i+1][0])/2,my=(pts[i][1]+pts[i+1][1])/2; g.quadraticCurveTo(pts[i][0],pts[i][1],mx,my);} g.lineTo(pts[pts.length-1][0],pts[pts.length-1][1]); }
 function smoothStroke(pts){
@@ -168,22 +201,47 @@ function simplifyDP(pts,tol){ if(!pts||pts.length<3)return pts?pts.slice():[];  
     for(let i=s+1;i<e;i++){ const t=((pts[i][0]-ax)*dx+(pts[i][1]-ay)*dy)/L2, px=ax+t*dx,py=ay+t*dy, d=(pts[i][0]-px)**2+(pts[i][1]-py)**2; if(d>md){md=d;mi=i;} }
     if(md>tol*tol&&mi>0){ keep[mi]=true; st.push([s,mi],[mi,e]); } }
   return pts.filter((_,i)=>keep[i]); }
+// pick a point along a river to anchor its name — the non-water point nearest the river's midpoint, so the label sits mid-river on land
+function riverNamePt(p){ const N=p.length-1, L=layout(), target=N*0.5, land=[];
+  for(let k=1;k<N;k++){ const hx=pickHex(p[k][0],p[k][1],L); if(hx && M.hex[hx[0]+','+hx[1]]!=='Water') land.push(k); }
+  if(!land.length) return Math.max(1,Math.floor(target));
+  let best=land[0]; for(const k of land) if(Math.abs(k-target)<Math.abs(best-target)) best=k;
+  return best; }
 function drawStroke(g,d){ if(!d||!d.pts||d.pts.length<2)return; g.save(); g.lineJoin='round'; g.lineCap='round';
   // rivers / borders / trails are drawn faded so they sit into the map instead of standing out
-  if(d.kind==='river'){ g.globalAlpha=0.65; g.strokeStyle=INK; g.lineWidth=2.6; smoothPath(g,d.pts); g.stroke(); }
+  if(d.kind==='river'){ g.globalAlpha=0.85; g.strokeStyle=INK; const p=d.pts, N=p.length-1;   // taper thin (source) → thick (mouth), drawn per-segment
+    for(let i=0;i<N;i++){ const f=i/Math.max(1,N-1); g.lineWidth=1.3+f*3.4; g.beginPath(); g.moveTo(p[i][0],p[i][1]); g.lineTo(p[i+1][0],p[i+1][1]); g.stroke(); }
+    const a=p[N], pre=p[N-1]||a;                                                              // small delta where the river empties into water (mouthWater precomputed at gen; lazy for manual rivers)
+    const mw = d.mouthWater!==undefined ? d.mouthWater : (()=>{ const mh=pickHex(a[0],a[1],layout()); return !!(mh&&M.hex[mh[0]+','+mh[1]]==='Water'); })();
+    if(mw){ const ang=Math.atan2(a[1]-pre[1],a[0]-pre[0]), len=layout().size*0.5; g.lineWidth=2.2;
+      for(const da of[-0.5,0,0.5]){ g.beginPath(); g.moveTo(a[0],a[1]); g.lineTo(a[0]+Math.cos(ang+da)*len,a[1]+Math.sin(ang+da)*len); g.stroke(); } }
+    if(d.name){ const mi=(d.nameIdx!=null)?d.nameIdx:riverNamePt(p), m=p[mi], m2=p[mi+1]||p[mi-1]||m, ang=Math.atan2(m2[1]-m[1],m2[0]-m[0]); g.globalAlpha=1; g.save(); g.translate(m[0],m[1]); g.rotate(Math.abs(ang)>Math.PI/2?ang+Math.PI:ang); haloTxt(g,0,-7,d.name,false,12); g.restore(); } }
   else if(d.kind==='border'){ g.globalAlpha=0.5; g.strokeStyle=INK; g.lineWidth=2.4; g.setLineDash([9,6]); smoothPath(g,d.pts); g.stroke(); }
   else if(d.kind==='trail'){ g.globalAlpha=0.45; g.strokeStyle=INK; g.lineWidth=1.5; g.setLineDash([2,7]); smoothPath(g,d.pts); g.stroke(); }
-  else { g.strokeStyle=INK; g.lineWidth=4.6; smoothPath(g,d.pts); g.stroke(); g.strokeStyle=PAP; g.lineWidth=1.7; g.setLineDash([7,5]); smoothPath(g,d.pts); g.stroke(); }
+  else { g.strokeStyle=PAP; g.lineWidth=5.4; smoothPath(g,d.pts); g.stroke(); g.strokeStyle=INK; g.lineWidth=2.8; smoothPath(g,d.pts); g.stroke(); }   // road = ink line with a paper casing → clean corridor over terrain
   g.restore(); }
 
 // ---------- render ----------
 function fitCanvas(){
+  let w,h;
   if(M.mode==='wild'){ const hw=Math.sqrt(3)*WILD_HEX;
-    const w=Math.max(1000,Math.ceil(hw*(M.cols+0.5)+240)), h=Math.max(1180,Math.ceil(150+1.5*WILD_HEX*M.rows+WILD_HEX+460));   // size to grid: 120px side pads, 150 top band, 460 bottom band for legend/scale
-    if(cv.width!==w)cv.width=w; if(cv.height!==h)cv.height=h; }
-  else { const w=Math.max(1040,M.cols*DUN_CELL+360), h=Math.max(960,150+M.rows*DUN_CELL+460); if(cv.width!==w)cv.width=w; if(cv.height!==h)cv.height=h; }
+    w=Math.max(1000,Math.ceil(hw*(M.cols+0.5)+240)); h=Math.max(1180,Math.ceil(150+1.5*WILD_HEX*M.rows+WILD_HEX+460)); }   // size to grid: 120px side pads, 150 top band, 460 bottom band for legend/scale
+  else { w=Math.max(1040,M.cols*DUN_CELL+360); h=Math.max(960,150+M.rows*DUN_CELL+460); }
+  LW=w; LH=h;
+  const dpr=DPR(), vw=cwrap.clientWidth||1000, vh=cwrap.clientHeight||800;   // backing store = just the visible window (× dpr)
+  if(cv.style.width!==vw+'px')cv.style.width=vw+'px'; if(cv.style.height!==vh+'px')cv.style.height=vh+'px';
+  const bw=Math.round(vw*dpr), bh=Math.round(vh*dpr);
+  if(cv.width!==bw)cv.width=bw; if(cv.height!==bh)cv.height=bh;
 }
-function render(){ fitCanvas(); applyZoom(); ctx.save(); ctx.clearRect(0,0,cv.width,cv.height); ctx.fillStyle=PAP; ctx.fillRect(0,0,cv.width,cv.height); (M.mode==='wild'?drawWild:drawDun)(ctx,cv.width,cv.height); ctx.restore(); drawGhost(); }
+function render(){ fitCanvas(); applyZoom(); clampPan();
+  const dpr=DPR(), z=zoom*dpr;
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);     // dark desk shows through outside the map page
+  ctx.setTransform(z,0,0,z,-panX*z,-panY*z);                                // logical → device (pan + zoom)
+  const vw=cwrap.clientWidth/zoom, vh=cwrap.clientHeight/zoom, m=WILD_HEX*2;
+  cullRect={x0:panX-m,y0:panY-m,x1:panX+vw+m,y1:panY+vh+m};                 // only draw hexes inside the viewport (+margin)
+  ctx.fillStyle=PAP; ctx.fillRect(0,0,LW,LH);                              // the paper page
+  (M.mode==='wild'?drawWild:drawDun)(ctx,LW,LH); drawGhost(); }
+function inCull(x,y){ return !cullRect || (x>=cullRect.x0&&x<=cullRect.x1&&y>=cullRect.y0&&y<=cullRect.y1); }
 function scheduleGhost(){ if(ghostPending)return; ghostPending=true; requestAnimationFrame(()=>{ghostPending=false;render();}); }
 function drawGhost(){ if(hoverX==null)return; const L=layout(); ctx.save(); ctx.globalAlpha=0.5;
   if(M.mode==='dun'){
@@ -205,15 +263,27 @@ function updateHoverCursor(px,py){ if(spaceHeld||panning||painting)return;
 
 function drawWild(g,W,H){
   const L=layout();
-  for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const[x,y]=hcenter(c,r,L); poly(g,hcorners(x,y,L.size),null,GRID,1); }
+  for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const[x,y]=hcenter(c,r,L); if(!inCull(x,y))continue; poly(g,hcorners(x,y,L.size),null,GRID,1); }
   // roads/rivers under the terrain symbols: they stay continuous and the symbols sit cleanly on top (not overprinted)
   if(lyr('lines')){ for(const[pts,style]of M.roads) drawRoute(g,pts.map(p=>hcenter(p[0],p[1],L)),style); if(M.curRoad) drawRoute(g,M.curRoad.map(p=>hcenter(p[0],p[1],L)),M.curStyle);
-    M.drawsW.forEach((d,i)=>{ if(!og(d))return; if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle='#c9a227';g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();} drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); }); if(curStroke&&M.mode==='wild') drawStroke(g,curStroke); }
-  if(lyr('terrain')) for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const key=c+','+r,t=M.hex[key]; if(!t||!og(t))continue; const[x,y]=hcenter(c,r,L); const name=(typeof t==='string')?t:t.n;
-    if(name==='Water'){ poly(g,hcorners(x,y,L.size),WATERC,GRID,1); if(t&&t.gm)gmDot(g,x+L.size*0.66,y-L.size*0.66); continue; }   // water = solid grey hex (no icon)
+    M.drawsW.forEach((d,i)=>{ if(!og(d)||d.kind==='road')return; if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle='#c9a227';g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();} drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); }); if(curStroke&&M.mode==='wild') drawStroke(g,curStroke); }   // rivers/trails/borders under terrain; roads drawn on top below
+  if(lyr('terrain')) for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const key=c+','+r,t=M.hex[key]; if(!t||!og(t))continue; const[x,y]=hcenter(c,r,L); if(!inCull(x,y))continue; const name=(typeof t==='string')?t:t.n;
+    if(name==='Water'){ poly(g,hcorners(x,y,L.size),WATERC,GRID,1); if(t&&t.gm)gmDot(g,x+L.size*0.66,y-L.size*0.66); continue; }   // water = solid grey hex
     if(name==='Blank'){ if(t&&t.gm)gmDot(g,x+L.size*0.66,y-L.size*0.66); continue; }                                            // blank = empty hex
-    const tr=(typeof t==='string')?null:t; drawIconT(g,'hex',name,x,y,L.size*1.68,L.size*1.52,tr); if(t&&t.gm)gmDot(g,x+L.size*0.66,y-L.size*0.66); }
-  { let n=0; for(const s of M.sites){ n++; if(!og(s))continue; const[x,y]=hcenter(s.c,s.r,L); if(lyr('keys')){disc(g,x,y,15,INK); txt(g,x,y,String(s.n||n),15,true,PAP); if(s.gm)gmDot(g,x+12,y-12);} if(lyr('text'))haloTxt(g,x,y+24,s.label,false,14); } }
+    const tr=(typeof t==='string')?null:t; drawIconT(g,'hex',name,x,y,L.size*1.68,L.size*1.52,tr); if(t&&t.gm)gmDot(g,x+L.size*0.66,y-L.size*0.66); }   // all terrain = its hex icon
+  if(lyr('lines')) M.drawsW.forEach((d,i)=>{ if(!og(d)||d.kind!=='road')return;   // roads ON TOP of terrain with a paper casing → a clean route cut through forest/hills, not tangled behind tree icons
+    if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle='#c9a227';g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();}
+    drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); });
+  { const reqs=[], SETTLE=['Castle','Capital','City','Town','Village','Keep','Fort','Tower']; let n=0;
+    for(const s of M.sites){ if(!og(s))continue; const[x,y]=hcenter(s.c,s.r,L);
+      if(s.kind==='place'){ if(s.gm)gmDot(g,x+12,y-12);
+        if(lyr('text')&&s.label){ const t=M.hex[s.c+','+s.r], nm=(typeof t==='string')?t:(t&&t.n); const px=s.water?(/Sea|Ocean/.test(s.label)?26:19):14; reqs.push({cx:x,cy:y,s:L.size,text:s.label,px,prio:SETTLE.includes(nm)?0:1,sel:M.sites[selSite]===s}); }
+        continue; }
+      n++; if(lyr('keys')){disc(g,x,y,15,INK); txt(g,x,y,String(s.n||n),15,true,PAP); if(s.gm)gmDot(g,x+12,y-12);}
+      if(lyr('text')&&s.label) reqs.push({cx:x,cy:y,s:L.size,text:s.label,px:14,prio:2,sel:M.sites[selSite]===s}); }
+    const placed=[];                                                                                          // river names are obstacles labels should avoid
+    for(const d of M.drawsW){ if(d.kind==='river'&&d.name&&og(d)){ const m=d.pts[(d.nameIdx!=null)?d.nameIdx:riverNamePt(d.pts)]; placed.push(labelBox(g,d.name,12,m[0],m[1]-7)); } }
+    if(lyr('text')) placeLabels(g,reqs,placed); }
   if(selHex&&M.hex[selHex]){ const p=selHex.split(',').map(Number),[x,y]=hcenter(p[0],p[1],L); g.save(); g.setLineDash([5,4]); poly(g,hcorners(x,y,L.size*0.94),null,'#c9a227',2); g.restore(); }
   cartouche(g,W/2,52,M.title); compass(g,W-78,150); scalebar(g,120,H-78,L.hw,Math.min(6,M.cols),'1 hex ≈ '+fmtScale(M.milesPerHex||1)+' mile'+((M.milesPerHex||1)==1?'':'s'));
   legendWild(g,W-300,H);
@@ -298,7 +368,7 @@ function layersPanel(a){
   }
   const note=document.createElement('div'); note.style.cssText='font-size:11px;color:#999;margin-top:4px'; note.textContent='Select an object, press G = just it GM-only. Export uses current view.'; a.appendChild(note);
 }
-function setMode(m){ M.mode=m; commitRoad(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; borderLast=null; dragging=null; curStroke=null; document.getElementById('tabWild').classList.toggle('on',m==='wild'); document.getElementById('tabDun').classList.toggle('on',m==='dun');
+function setMode(m){ M.mode=m; commitRoad(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; borderLast=null; dragging=null; curStroke=null; document.getElementById('tabWild').classList.toggle('on',m==='wild'); document.getElementById('tabDun').classList.toggle('on',m==='dun');
   tool=(m==='wild'?'terrain':'stamp'); curIcon=(m==='wild'?'Forest':(ICONS.dungeon[0]||{}).n||'Door1x1');
   M.cols=(m==='wild'?M.colsW:M.colsD); M.rows=(m==='wild'?M.rowsW:M.rowsD);
   document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows;
@@ -309,7 +379,7 @@ function setMode(m){ M.mode=m; commitRoad(); sel=-1; selHex=null; selDraw=-1; se
   buildTools(); render(); }
 
 // ---------- interaction ----------
-function evpos(e){ const r=cv.getBoundingClientRect(); return [(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height]; }
+function evpos(e){ const r=cv.getBoundingClientRect(); return [panX+(e.clientX-r.left)/zoom, panY+(e.clientY-r.top)/zoom]; }
 let painting=false;
 function apply(px,py,first){
   const L=layout();
@@ -319,11 +389,11 @@ function apply(px,py,first){
   if(M.mode==='wild'){
     if(tool==='terrain'||tool==='erasehex'||tool==='water'){ const hx=pickHex(px,py,L); if(hx){ if(first)snap(); const k=hx[0]+','+hx[1]; if(tool==='erasehex')delete M.hex[k]; else if(tool==='water')M.hex[k]='Water'; else M.hex[k]={n:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}; } }
     else if(tool==='select'){
-      if(first){ snap(); selHex=null; selDraw=-1; dragging=null; dragPrev={x:px,y:py}; let bi=-1,bd=900; M.sites.forEach((s,i)=>{const[x,y]=hcenter(s.c,s.r,L);const d=(x-px)**2+(y-py)**2;if(d<bd){bd=d;bi=i;}}); if(bi>=0){dragging={k:'site',i:bi};} else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};} else { const hx=pickHex(px,py,L); if(hx&&M.hex[hx[0]+','+hx[1]]){selHex=hx[0]+','+hx[1]; dragging={k:'hex'};} } } buildTools(); }
+      if(first){ snap(); selHex=null; selDraw=-1; selSite=-1; dragging=null; dragPrev={x:px,y:py}; let bi=-1,bd=900; M.sites.forEach((s,i)=>{const[x,y]=hcenter(s.c,s.r,L);const d=(x-px)**2+(y-py)**2;if(d<bd){bd=d;bi=i;}}); if(bi>=0){selSite=bi; dragging={k:'site',i:bi};} else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};} else { const hx=pickHex(px,py,L); if(hx&&M.hex[hx[0]+','+hx[1]]){selHex=hx[0]+','+hx[1]; dragging={k:'hex'};} } } buildTools(); }
       else if(dragging){ if(dragging.k==='draw'){ const d=curDraws()[dragging.i]; if(d){const dx=px-dragPrev.x,dy=py-dragPrev.y; for(const p of d.pts){p[0]+=dx;p[1]+=dy;}} dragPrev={x:px,y:py}; } else { const hx=pickHex(px,py,L); if(hx){ if(dragging.k==='site'){M.sites[dragging.i].c=hx[0];M.sites[dragging.i].r=hx[1];} else if(dragging.k==='hex'){ const nk=hx[0]+','+hx[1]; if(nk!==selHex){ M.hex[nk]=M.hex[selHex]; delete M.hex[selHex]; selHex=nk; } } } } }
     }
     else if(!first)return;
-    else if(tool==='site'){ const hx=pickHex(px,py,L); if(hx){ snap(); const label=prompt('Site label (e.g. Hush Road):',''); M.sites=M.sites.filter(s=>!(s.c===hx[0]&&s.r===hx[1])); M.sites.push({c:hx[0],r:hx[1],label:label||''}); } }
+    else if(tool==='site'){ const hx=pickHex(px,py,L); if(hx){ const ex=M.sites.find(s=>s.c===hx[0]&&s.r===hx[1]); const label=prompt(ex&&ex.kind==='place'?'Place name:':'Site label (e.g. Hush Road):', ex?ex.label:''); if(label!==null){ snap(); M.sites=M.sites.filter(s=>!(s.c===hx[0]&&s.r===hx[1])); M.sites.push({c:hx[0],r:hx[1],label:label||'',...(ex&&ex.kind==='place'?{kind:'place'}:{})}); } } }
   } else {
     if(tool==='floor'||tool==='rock'){ const c=pickCell(px,py,L); if(c){ if(first)snap(); if(tool==='floor')M.cells[c[0]+','+c[1]]='floor'; else delete M.cells[c[0]+','+c[1]]; } }
     else if(tool==='select'){
@@ -357,10 +427,10 @@ cv.addEventListener('pointerdown',e=>{ try{cv.setPointerCapture(e.pointerId);}ca
   });
 cv.addEventListener('pointermove',e=>{ if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pinching){ if(ptrs.size>=2){ const d=ptrSpread(),m=ptrMid();
-      if(pinchMid){ cwrap.scrollLeft-=(m[0]-pinchMid[0]); cwrap.scrollTop-=(m[1]-pinchMid[1]); }   // two-finger pan
+      if(pinchMid){ panBy(m[0]-pinchMid[0], m[1]-pinchMid[1]); }                                     // two-finger pan
       if(pinchDist>0&&d>0&&Math.abs(d-pinchDist)>0.5) zoomAt(d/pinchDist,m[0],m[1]);                 // pinch zoom
       pinchDist=d; pinchMid=m; } return; }
-  if(panning){ cwrap.scrollLeft-=(e.clientX-panLast.x); cwrap.scrollTop-=(e.clientY-panLast.y); panLast={x:e.clientX,y:e.clientY}; return; }   // drag-to-pan
+  if(panning){ panBy(e.clientX-panLast.x, e.clientY-panLast.y); panLast={x:e.clientX,y:e.clientY}; return; }   // drag-to-pan
   const[x,y]=evpos(e); hoverX=x; hoverY=y; if(painting){apply(x,y,false);}else{scheduleGhost();updateHoverCursor(x,y);} });
 function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2){ pinching=false; pinchDist=0; pinchMid=null; }
   if(panning&&ptrs.size===0){ panning=false; panLast=null; setCursor(); }
@@ -373,8 +443,8 @@ window.addEventListener('keydown',e=>{ if(e.key==='Escape'){commitRoad();curStro
   if(e.key===' '||e.code==='Space'){ if(!spaceHeld){spaceHeld=true;setCursor();} e.preventDefault(); return; }   // hold Space = pan (hand)
   const k=e.key.toLowerCase();
   if(k==='r')applyT('rot'); else if(k==='h')applyT('fx'); else if(k==='v')applyT('fy'); else if(k==='i')applyT('inv');
-  else if(k==='g'){ let o=null; if(selDraw>=0)o=curDraws()[selDraw]; else if(M.mode==='dun'){ if(sel>=0)o=M.syms[sel]; else if(selLabel>=0)o=M.labels[selLabel]; } else if(selHex){ if(typeof M.hex[selHex]==='string')M.hex[selHex]={n:M.hex[selHex],rot:0,fx:false,fy:false,inv:false}; o=M.hex[selHex]; } if(o){snap();o.gm=!o.gm;render();save();buildTools();} }
-  else if(k==='delete'||k==='backspace'){ if(selDraw>=0&&curDraws()[selDraw]){snap();curDraws().splice(selDraw,1);selDraw=-1;render();save();buildTools();} else if(M.mode==='dun'&&sel>=0&&M.syms[sel]){snap();M.syms.splice(sel,1);sel=-1;render();save();buildTools();} else if(M.mode==='dun'&&selLabel>=0&&M.labels[selLabel]){snap();M.labels.splice(selLabel,1);selLabel=-1;render();save();buildTools();} else if(M.mode==='wild'&&selHex&&M.hex[selHex]){snap();delete M.hex[selHex];selHex=null;render();save();buildTools();} } });
+  else if(k==='g'){ let o=null; if(M.mode==='wild'&&selSite>=0)o=M.sites[selSite]; else if(selDraw>=0)o=curDraws()[selDraw]; else if(M.mode==='dun'){ if(sel>=0)o=M.syms[sel]; else if(selLabel>=0)o=M.labels[selLabel]; } else if(selHex){ if(typeof M.hex[selHex]==='string')M.hex[selHex]={n:M.hex[selHex],rot:0,fx:false,fy:false,inv:false}; o=M.hex[selHex]; } if(o){snap();o.gm=!o.gm;render();save();buildTools();} }
+  else if(k==='delete'||k==='backspace'){ if(M.mode==='wild'&&selSite>=0&&M.sites[selSite]){snap();M.sites.splice(selSite,1);selSite=-1;render();save();buildTools();} else if(selDraw>=0&&curDraws()[selDraw]){snap();curDraws().splice(selDraw,1);selDraw=-1;render();save();buildTools();} else if(M.mode==='dun'&&sel>=0&&M.syms[sel]){snap();M.syms.splice(sel,1);sel=-1;render();save();buildTools();} else if(M.mode==='dun'&&selLabel>=0&&M.labels[selLabel]){snap();M.labels.splice(selLabel,1);selLabel=-1;render();save();buildTools();} else if(M.mode==='wild'&&selHex&&M.hex[selHex]){snap();delete M.hex[selHex];selHex=null;render();save();buildTools();} } });
 window.addEventListener('keyup',e=>{ if(e.key===' '||e.code==='Space'){ spaceHeld=false; if(!panning)setCursor(); } });
 
 // ---------- persistence + export ----------
@@ -390,18 +460,18 @@ document.getElementById('scale').addEventListener('input',e=>{ const v=Math.max(
 document.getElementById('tabWild').onclick=()=>setMode('wild');
 document.getElementById('tabDun').onclick=()=>setMode('dun');
 document.getElementById('undo').onclick=undo;
-document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; snap(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.curRoad=null;M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); };
+document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; snap(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.curRoad=null;M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); };
 document.getElementById('resize').onclick=()=>{ const c=Math.max(3,Math.min(120,+document.getElementById('cols').value)), r=Math.max(3,Math.min(120,+document.getElementById('rows').value)); M.cols=c; M.rows=r; if(M.mode==='wild'){M.colsW=c;M.rowsW=r;}else{M.colsD=c;M.rowsD=r;} render(); maybeFit(); save(); };
 document.getElementById('save').onclick=()=>{ readTitle(); const b=new Blob([JSON.stringify(M)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=(M.title||'map').replace(/\W+/g,'_')+'.json'; a.click(); };
 document.getElementById('load').onclick=()=>document.getElementById('file').click();
 document.getElementById('file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{Object.assign(M,JSON.parse(rd.result)); document.getElementById('cols').value=M.cols;document.getElementById('rows').value=M.rows; setMode(M.mode||'wild');}catch(err){alert('Bad file');} }; rd.readAsText(f); };
 const MAX_EXPORT_PX=16e6;   // Safari/iOS cap is ~16.7MP; stay under or the canvas exports blank
 document.getElementById('export').onclick=()=>{ readTitle();
-  let ss=SS; while(ss>1 && cv.width*ss*cv.height*ss>MAX_EXPORT_PX) ss--;   // drop supersample to fit
-  if(cv.width*ss*cv.height*ss>MAX_EXPORT_PX && !confirm('This map is very large — the exported image may fail or look low-res in some browsers. Export anyway?')) return;
-  const out=document.createElement('canvas'); out.width=Math.round(cv.width*ss); out.height=Math.round(cv.height*ss);
+  let ss=SS; while(ss>1 && LW*ss*LH*ss>MAX_EXPORT_PX) ss--;   // drop supersample to fit
+  if(LW*ss*LH*ss>MAX_EXPORT_PX && !confirm('This map is very large — the exported image may fail or look low-res in some browsers. Export anyway?')) return;
+  const out=document.createElement('canvas'); out.width=Math.round(LW*ss); out.height=Math.round(LH*ss);
   const free=()=>{ out.width=out.height=0; };
-  try{ const g=out.getContext('2d'); g.scale(ss,ss); g.fillStyle=PAP; g.fillRect(0,0,cv.width,cv.height); (M.mode==='wild'?drawWild:drawDun)(g,cv.width,cv.height); }
+  try{ const g=out.getContext('2d'); g.scale(ss,ss); g.fillStyle=PAP; g.fillRect(0,0,LW,LH); cullRect=null; (M.mode==='wild'?drawWild:drawDun)(g,LW,LH); }   // cullRect=null → export the whole map, not just the viewport
   catch(err){ free(); showBanner('Export failed while drawing the map: '+(err&&err.message||err)); return; }
   const fname=(M.title||'map').replace(/\W+/g,'_')+'_'+(M.view==='player'?'player':'GM')+'.png';
   try{ out.toBlob(b=>{ if(!b){ free(); showBanner('Export failed — the image is too large for this browser. Try fewer rows/cols, then export again.'); return; }
@@ -412,13 +482,40 @@ document.getElementById('zoomin').onclick=()=>zoomAt(1.25);
 document.getElementById('zoomout').onclick=()=>zoomAt(1/1.25);
 document.getElementById('zoomlbl').onclick=zoomReset;
 document.getElementById('zoomfit').onclick=zoomFit;
-cwrap.addEventListener('wheel',e=>{ if(e.ctrlKey||e.metaKey){ e.preventDefault(); zoomAt(e.deltaY<0?1.12:1/1.12, e.clientX, e.clientY); } },{passive:false});
+cwrap.addEventListener('wheel',e=>{ e.preventDefault(); if(e.ctrlKey||e.metaKey){ zoomAt(e.deltaY<0?1.12:1/1.12, e.clientX, e.clientY); } else { panBy(-e.deltaX,-e.deltaY); } },{passive:false});   // wheel = pan, ctrl+wheel = zoom
+let _rsz; window.addEventListener('resize',()=>{ clearTimeout(_rsz); _rsz=setTimeout(()=>render(),80); });   // viewport canvas tracks the window
 window.addEventListener('keydown',e=>{ if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return; if(e.key==='+'||e.key==='='){e.preventDefault();zoomAt(1.25);} else if(e.key==='-'||e.key==='_'){e.preventDefault();zoomAt(1/1.25);} else if(e.key==='0'){e.preventDefault();zoomReset();} });
 function setView(v){ M.view=v; const b=document.getElementById('view'); b.textContent=(v==='gm'?'GM view':'Player view'); b.classList.toggle('on',v==='player'); render(); save(); buildTools(); }
 document.getElementById('view').onclick=()=>setView(M.view==='gm'?'player':'gm');
 
 // ---------- random generation (+ coherence sweep) ----------
 const rnd=n=>Math.floor(Math.random()*n), rndf=()=>Math.random(), pick=a=>a[rnd(a.length)];
+// fantasy place-name generator (syllable tables) — used to label settlements/features on generated maps; names stay editable.
+function genPlaceName(){
+  const A=['Kor','El','Vor','Bren','Ash','Dun','Mor','Cael','Thal','Gran','Wyn','Hal','Drak','Fen','Sil','Bal','Tor','Esk','Ald','Rav','Gwyn','Cor','Mar','Oth'];
+  const B=['dur','mar','win','gar','val','moor','dale','heim','wick','holt','mond','rath','grim','var','wen','or','ash','ric','beck','lyn'];
+  const C=['','','ton','burg','hold','stead','fell','watch','reach','gate','crest','mere','keep'];
+  let s=pick(A)+pick(B)+pick(C); return s.charAt(0).toUpperCase()+s.slice(1);
+}
+// region/title name for the whole map
+function genRegionName(){ const n=genPlaceName();
+  const adj=['Broken','Shrouded','Hollow','Grey','Endless','Forgotten','Sundered','Misty','Wandering','Lost','Silent','Bleak','Far','Untamed'];
+  const land=['Lands','Reaches','Marches','Wilds','Vale','Expanse','Frontier','Wastes','Borderlands','Hinterlands','Downs','Moors'];
+  return pick([ 'The '+pick(adj)+' '+pick(land), n+' '+pick(['Marches','Reach','Vale','Wilds','Downs','Hinterland']),
+                'Vale of '+n, 'The '+pick(land)+' of '+n, 'The '+n+' '+pick(['Wilds','Marches','Frontier']) ]);
+}
+// features read as landmarks, not towns — name them for what they are
+function genFeatureName(type){ const n=genPlaceName();
+  switch(type){
+    case 'Cave': case 'Caves': return pick([n+' Cave', n+' Caverns', 'Caves of '+n]);
+    case 'Ruins': return pick(['Ruins of '+n, n+' Ruins', 'Old '+n]);
+    case 'Tomb': return pick(['Tomb of '+n, n+' Barrow', n+' Crypt']);
+    case 'StandingStones': return pick([n+' Stones', 'Stones of '+n, n+' Circle']);
+    case 'Mine': return pick([n+' Mine', n+' Delve', n+' Diggings']);
+    case 'Tower': return pick([n+' Tower', 'Tower of '+n, n+' Spire']);
+    default: return n;
+  }
+}
 function hexNbrs(c,r){ const D=(r&1)?[[1,0],[-1,0],[0,-1],[1,-1],[0,1],[1,1]]:[[1,0],[-1,0],[-1,-1],[0,-1],[-1,1],[0,1]]; const o=[]; for(const[dc,dr]of D){const x=c+dc,y=r+dr; if(x>=0&&x<M.cols&&y>=0&&y<M.rows)o.push([x,y]);} return o; }
 function dnm(name,fb){ return BY.dungeon[name]?name:(BY.dungeon[fb]?fb:(ICONS.dungeon[0]||{}).n); }
 
@@ -438,8 +535,20 @@ function edgeRoute(hexes,L){
   }
   return pts;
 }
+function intoHex(center,toward,dist){ const dx=toward[0]-center[0], dy=toward[1]-center[1], d=Math.hypot(dx,dy)||1; return [center[0]+dx/d*dist, center[1]+dy/d*dist]; }
+// Roads draw UNDER the terrain symbols, so they run straight through hex CENTRES (a direct, purposeful line)
+// rather than weaving corner-to-corner along hex edges like a river. Douglas-Peucker drops the collinear
+// hex-centre zigzag so long runs read as one clean line; each settlement end stops `gap` short of its symbol.
+function roadRoute(path,L){
+  let pts=path.map(h=>hcenter(h[0],h[1],L));
+  const n=pts.length-1, gap=L.size*0.72;
+  pts[0]=intoHex(pts[0],pts[1],gap);                            // start: gap short of the settlement symbol, aimed along the road
+  pts[n]=intoHex(pts[n],pts[n-1],gap);                          // end:   same
+  return simplifyDP(pts, L.size*0.5);                           // collapse straight runs of hexes into single segments
+}
 function genWild(){
   snap(); M.hex={}; M.sites=[]; M.roads=[]; M.drawsW=[]; selHex=null;
+  M.title=M.titleW=genRegionName(); { const ti=document.getElementById('title'); if(ti)ti.value=M.title; }   // fresh region name each generate
   const cols=M.cols, rows=M.rows, L=layout();
   const base=['Grassland','Grassland','Forest','Forest','Hills','Mountains','Swamp','Desert','Evergreen','Badlands','ForestedHills','Jungle'];
   const seeds=[];
@@ -451,39 +560,73 @@ function genWild(){
   for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ const[x,y]=hcenter(c,r,L); let bt=seeds[0].t,bd=1e18; for(const s of seeds){const jx=s.x+(rndf()-.5)*L.hw*.7, jy=s.y+(rndf()-.5)*L.hw*.7, d=(x-jx)**2+(y-jy)**2; if(d<bd){bd=d;bt=s.t;}} g[c+','+r]=bt; }
   for(let pass=0;pass<2;pass++){ const ng={}; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ const cnt={}; for(const[nc,nr]of hexNbrs(c,r)){const t=g[nc+','+nr]; cnt[t]=(cnt[t]||0)+1;} let mt=g[c+','+r],mc=0; for(const t in cnt)if(cnt[t]>mc){mc=cnt[t];mt=t;} ng[c+','+r]=mc>=4?mt:g[c+','+r]; } Object.assign(g,ng); }
   for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ if((g[c+','+r]==='Grassland'||g[c+','+r]==='Badlands')&&hexNbrs(c,r).some(([nc,nr])=>g[nc+','+nr]==='Mountains')&&rndf()<.5) g[c+','+r]='Hills'; }
+  // OCEAN: only at a large geographic span (cols × miles/hex). < ~150 mi = landlocked (lakes only); a wiggly coast
+  // floods in from an edge, depth scaling with span; a second, shallower coast appears past ~600 mi.
+  { const span=Math.max(cols,rows)*(M.milesPerHex||1);
+    if(span>=150){ const base=0.10+0.35*Math.min(1,(span-150)/600), allE=['N','S','E','W'];
+      const coasts=[{edge:pick(allE),depth:base}];
+      if(span>=600){ coasts.push({edge:pick(allE.filter(e=>e!==coasts[0].edge)),depth:base*0.5}); }
+      for(const{edge,depth}of coasts){ const ph=rndf()*6.283;
+        for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+          const f= edge==='N'?r/Math.max(1,rows-1) : edge==='S'?(rows-1-r)/Math.max(1,rows-1) : edge==='W'?c/Math.max(1,cols-1) : (cols-1-c)/Math.max(1,cols-1);
+          const along=(edge==='N'||edge==='S')?c/Math.max(1,cols-1):r/Math.max(1,rows-1);
+          if(f < depth + 0.09*Math.sin(along*Math.PI*3+ph) + (rndf()-0.5)*0.05) g[c+','+r]='Water';
+        } } } }
   for(const k in g) M.hex[k]=g[k];
   const settle=[], goodSet=(c,r)=>['Grassland','Hills','Forest','Evergreen','ForestedHills'].includes(g[c+','+r]);
   const nset=Math.min(5,Math.max(2,Math.round(cols*rows/40))); let t=0;
-  while(settle.length<nset && t++<300){ const c=rnd(cols),r=rnd(rows); if(!goodSet(c,r)||settle.some(s=>Math.abs(s[0]-c)+Math.abs(s[1]-r)<3))continue; settle.push([c,r]); M.hex[c+','+r]= settle.length===1?'Castle':pick(['Town','Village','Village','Tower']); }
+  while(settle.length<nset && t++<300){ const c=rnd(cols),r=rnd(rows); if(!goodSet(c,r)||settle.some(s=>Math.abs(s[0]-c)+Math.abs(s[1]-r)<3))continue; settle.push([c,r]); M.hex[c+','+r]= settle.length===1?'Castle':pick(['Town','Village','Village','Tower']); M.sites.push({c,r,label:genPlaceName(),kind:'place'}); }
   // scatter features BEFORE routing so roads/rivers can curve around them too
   const feats=[['Ruins',['Grassland','Hills','Forest','Badlands','ForestedHills']],['Cave',['Hills','Mountains','EvergreenMountains','ForestedMountains']],['StandingStones',['Grassland','Badlands','Hills']],['Tower',['Hills','Grassland','ForestedHills']],['Tomb',['Hills','Badlands','Grassland']],['Mine',['Hills','Mountains','EvergreenMountains','ForestedMountains','SnowMountains']]];
-  { let ft=0,fp=0; while(fp<4 && ft++<300){ const c=rnd(cols),r=rnd(rows),cur=g[c+','+r],f=pick(feats); if(f[1].includes(cur)&&!settle.some(s=>s[0]===c&&s[1]===r)){M.hex[c+','+r]=f[0];fp++;} } }
+  { let ft=0,fp=0; while(fp<4 && ft++<300){ const c=rnd(cols),r=rnd(rows),cur=g[c+','+r],f=pick(feats); if(f[1].includes(cur)&&!settle.some(s=>s[0]===c&&s[1]===r)){M.hex[c+','+r]=f[0]; M.sites.push({c,r,label:genFeatureName(f[0]),kind:'place'}); fp++;} } }
   // road network: minimum spanning tree over settlements, each edge routed hex-by-hex around mountains/water
   const rcost=(c,r)=>{ const tt=g[c+','+r];
-    if(tt==='Water')return 60;
+    if(tt==='Water')return 4000;          // effectively impassable: roads hug the coast / go around, never cut across water
     if(tt==='Mountains'||tt==='SnowMountains'||tt==='EvergreenMountains'||tt==='ForestedMountains'||tt==='Volcano')return 16;
     if(tt==='Swamp'||tt==='Marsh'||tt==='Jungle'||tt==='JungleHills')return 9;
     if(tt==='Desert'||tt==='RockyDesert'||tt==='SandDunes'||tt==='Badlands'||tt==='Cactus'||tt==='HeavyCactus')return 3;
     if(tt==='Hills'||tt==='ForestedHills'||tt==='EvergreenHills'||tt==='Forest'||tt==='HeavyForest'||tt==='Evergreen'||tt==='HeavyEvergreen')return 2.4;
     return 1; };
-  if(settle.length>1){ const inTree=[0], todo=settle.map((_,i)=>i).filter(i=>i>0);
+  if(settle.length>1){ const N=settle.length, key=h=>h[0]+','+h[1];
+    const pcost=p=>{ let s=0; for(let k=1;k<p.length;k++)s+=rcost(p[k][0],p[k][1]); return s; };
+    const D=Array.from({length:N},()=>new Array(N).fill(1e18));                                // real least-cost distance between every pair of settlements
+    for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){ const p=hexPath(settle[i],settle[j],g,rcost); const cst=p?pcost(p):1e18; D[i][j]=D[j][i]=cst; }
+    const inTree=[0], todo=settle.map((_,i)=>i).filter(i=>i>0), edges=[];                       // Prim MST on real route cost → terrain-aware topology, not straight-line nearest
     while(todo.length){ let pk=0,from=0,bd=1e18;
-      todo.forEach((ti,ix)=>{ inTree.forEach(ci=>{ const d=Math.abs(settle[ti][0]-settle[ci][0])+Math.abs(settle[ti][1]-settle[ci][1]); if(d<bd){bd=d;pk=ix;from=ci;} }); });
-      const ti=todo[pk], path=hexPath(settle[from],settle[ti],g,rcost);
-      if(path&&path.length>1){ M.drawsW.push({pts:smoothStroke(edgeRoute(path,L)),kind:'road'}); }
-      inTree.push(ti); todo.splice(pk,1); } }
+      todo.forEach((ti,ix)=>{ inTree.forEach(ci=>{ if(D[ci][ti]<bd){bd=D[ci][ti];pk=ix;from=ci;} }); });
+      edges.push([from,todo[pk]]); inTree.push(todo[pk]); todo.splice(pk,1); }
+    const roadHexes=new Set(settle.map(key));                                                   // towns + already-built roads are cheap, so new roads merge onto them → trunk roads, junctions, branches
+    const rcost2=(c,r)=> roadHexes.has(c+','+r) ? 0.3 : rcost(c,r);
+    for(const [a,b] of edges){ const path=hexPath(settle[a],settle[b],g,rcost2);
+      if(path&&path.length>1){ for(const h of path) roadHexes.add(key(h)); M.drawsW.push({pts:smoothStroke(roadRoute(path,L)),kind:'road'}); } } }
   // river: from a high, inland source carve downhill to the nearest water or map edge (A* favours low ground)
   const elevOf=t=>(t==='Mountains'||t==='SnowMountains'||t==='EvergreenMountains'||t==='ForestedMountains'||t==='Volcano')?5:(t==='Hills'||t==='ForestedHills'||t==='EvergreenHills'||t==='JungleHills')?3:(t==='Forest'||t==='HeavyForest'||t==='Evergreen'||t==='HeavyEvergreen'||t==='Jungle')?2:(t==='Swamp'||t==='Marsh')?0:1;
   const hi=[]; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ const e=elevOf(g[c+','+r]); if(e>=3)hi.push([c,r,e+Math.min(c,cols-1-c,r,rows-1-r)*1.6]); }
   if(!hi.length)for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ if(g[c+','+r]!=='Water')hi.push([c,r,Math.min(c,cols-1-c,r,rows-1-r)*1.6]); } // flat map: source from the most inland land
   const waters=[]; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) if(g[c+','+r]==='Water') waters.push([c,r]);
-  if(hi.length){ hi.sort((a,b)=>b[2]-a[2]); const src=hi[rnd(Math.min(2,hi.length))];
-    let tgt=null,bd=1e18;
-    for(const w of waters){ const d=Math.abs(w[0]-src[0])+Math.abs(w[1]-src[1]); if(d>1&&d<bd){bd=d;tgt=w;} }                                  // always empty into the nearest lake / sea when any water exists
-    if(!tgt){ bd=1e18; for(const e of [[0,src[1]],[cols-1,src[1]],[src[0],0],[src[0],rows-1]]){ const d=Math.abs(e[0]-src[0])+Math.abs(e[1]-src[1]); if(d<bd){bd=d;tgt=e;} } }   // no water on the map → run off the nearest edge
-    const rcostR=(c,r)=>{ const tt=g[c+','+r]; return tt==='Water'?0.15:1+elevOf(tt)*1.6; };   // strongly prefer low ground, pour into water
-    const rp=tgt&&hexPath([src[0],src[1]],tgt,g,rcostR);
-    if(rp&&rp.length>2)M.drawsW.push({pts:smoothStroke(edgeRoute(rp,L)),kind:'river'}); }
+  const rcostR=(c,r)=>{ const tt=g[c+','+r]; return tt==='Water'?0.15:1+elevOf(tt)*1.6; };       // strongly prefer low ground, pour into water
+  if(hi.length){ hi.sort((a,b)=>b[2]-a[2]);                                                       // more, spaced rivers on bigger maps; each runs source → nearest sea
+    const nriv=Math.min(6,Math.max(1,Math.round(cols*rows/350))), used=[], minSep=Math.max(3,Math.max(cols,rows)*0.18);
+    for(let ri=0; ri<hi.length && used.length<nriv; ri++){ const src=hi[ri];
+      if(used.some(u=>Math.abs(u[0]-src[0])+Math.abs(u[1]-src[1])<minSep)) continue;
+      let tgt=null,bd=1e18;
+      for(const w of waters){ const d=Math.abs(w[0]-src[0])+Math.abs(w[1]-src[1]); if(d>1&&d<bd){bd=d;tgt=w;} }
+      if(!tgt){ bd=1e18; for(const e of [[0,src[1]],[cols-1,src[1]],[src[0],0],[src[0],rows-1]]){ const d=Math.abs(e[0]-src[0])+Math.abs(e[1]-src[1]); if(d<bd){bd=d;tgt=e;} } }
+      const rp=tgt&&hexPath([src[0],src[1]],tgt,g,rcostR);
+      if(rp&&rp.length>2){ const pts=smoothStroke(simplifyDP(edgeRoute(rp,L),L.size*0.5)), mhx=pickHex(pts[pts.length-1][0],pts[pts.length-1][1],L);   // precompute name anchor + mouth so render() never re-scans the whole grid
+        M.drawsW.push({pts,kind:'river',name:genPlaceName()+' River',nameIdx:riverNamePt(pts),mouthWater:!!(mhx&&M.hex[mhx[0]+','+mhx[1]]==='Water')}); used.push(src); } } }
+  // name notable water bodies — flood-fill connected Water hexes; large ones get a sea/lake name at their centroid
+  { const seen=new Set();
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ const k0=c+','+r; if(M.hex[k0]!=='Water'||seen.has(k0))continue;
+      const comp=[]; const stack=[[c,r]]; seen.add(k0);
+      while(stack.length){ const[cc,cr]=stack.pop(); comp.push([cc,cr]); for(const[nc,nr]of hexNbrs(cc,cr)){ const nk=nc+','+nr; if(M.hex[nk]==='Water'&&!seen.has(nk)){seen.add(nk);stack.push([nc,nr]);} } }
+      if(comp.length<6) continue;                                                                 // skip ponds
+      let sx=0,sy=0; for(const[cc,cr]of comp){sx+=cc;sy+=cr;} sx/=comp.length; sy/=comp.length;
+      let best=comp[0],bdc=1e18; for(const cc of comp){const d=(cc[0]-sx)**2+(cc[1]-sy)**2; if(d<bdc){bdc=d;best=cc;}}
+      const edge=comp.some(([cc,cr])=>cc===0||cr===0||cc===cols-1||cr===rows-1), nm=genPlaceName();
+      const label = (edge&&comp.length>=Math.max(25,cols*rows*0.05)) ? pick(['The '+nm+' Sea','Sea of '+nm,'The '+nm+' Ocean'])
+                  : comp.length>=16 ? pick(['Lake '+nm, nm+' Mere', 'Lake '+nm]) : pick(['Lake '+nm, nm+' Pool', nm+' Mere']);
+      M.sites.push({c:best[0],r:best[1],label,kind:'place',water:true}); } }
   render(); maybeFit(); save();
 }
 function hexPath(a,b,g,cost){

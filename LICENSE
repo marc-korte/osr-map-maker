@@ -1,0 +1,41 @@
+MIT License
+
+Copyright (c) 2026 Marc Korte
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+The MIT license above covers the application code (index.html), the icon
+generator scripts under maps/ (gen_hexicons.py, gen_stairs.py, etc.), and the
+original wilderness feature/settlement art they produce (Castle, Town, Village,
+Tower, Keep, City, Ruins, Cave, Tomb, Mine, StandingStones, bridges, roads,
+rivers, and the like).
+
+The following bundled icon sets are separate third-party works and are NOT
+covered by the MIT grant above; they remain under their own upstream terms:
+
+  * Wilderness TERRAIN tiles (maps/icons/hex/ — e.g. Forest, Mountains, Hills,
+    Swamp, Desert, Grassland, Evergreen, Jungle, Badlands, Volcano): the
+    "Black & White Classic" free icon set from Hexographer (Inkwell Ideas),
+    https://www.hexographer.com/extra-icon-sets/black-white-classic/ — used
+    under that publisher's terms.
+
+  * Dungeon map symbols (maps/icons/dungeon/): "Classic Dungeon Map Symbols"
+    by Mark Gosbell, dedicated to the public domain under CC0 1.0.
+
+See CREDITS.md for full attribution.

@@ -13,6 +13,14 @@ downsample, so the line art is clean enough to drop straight into the PDF.
 | `gen_wreath.py` | The Wreath dungeon (B-series grid style): the ring upper level (iris entry, gallery, the Rejected cells, the wet crawl, the stairs, the white-tree courtyard) and the lower precursor level (Cold Gallery, Drone Bay, Governor, Coolant Sump, Operator's Hall). → `wreath_map.png` |
 | `gen_all.py` | Runs both. |
 
+> **Hex terrain icons note:** the wilderness *terrain* tiles in `icons/hex/` are
+> now the external **Hexographer Black & White Classic** set (see
+> `../CREDITS.md`), not generated art. `gen_hexicons.py` still generates the
+> *feature/settlement* glyphs (Castle, Town, Ruins, …) but its old terrain
+> output (Forest, Mountains, Grasslands, Pines, …) is superseded — **do not
+> blindly re-run it**, as it would overwrite the Hexographer terrain tiles and
+> re-introduce removed names. Re-run only after pruning its terrain outputs.
+
 ## Requirements
 
 Python 3 and Pillow.

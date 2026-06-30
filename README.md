@@ -5,6 +5,10 @@ Pure static front end: `index.html` + a bundled `icons.js` (icons are inlined as
 data URIs). No backend, no database, no accounts — your maps live in your own
 browser.
 
+> An independent fan tool, not affiliated with or endorsed by TSR, Wizards of the
+> Coast, or any trademark holder. "B/X", "OSR", and similar terms are used
+> descriptively. Dungeon symbols are CC0 by Mark Gosbell — see [CREDITS.md](CREDITS.md).
+
 **▶ Live: https://marc-korte.github.io/osr-map-maker/**
 
 Each person who opens the link gets their own private workspace; maps are saved

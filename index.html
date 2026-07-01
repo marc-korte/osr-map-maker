@@ -363,19 +363,25 @@ function drawDun(g,W,H){
   M.syms.forEach((s,i)=>{ const isKey=s.type==='key'; const on=(isKey?lyr('keys'):lyr('symbols'))&&og(s); if(!on)return; if(isKey){ const t=String(s.n||'#'), kr=t.length>1?11:10; disc(g,s.x,s.y,kr,INK); txt(g,s.x,s.y,t,kr*1.05,true,PAP); } else { const[tw,th]=tiles(s.icon); drawIconT(g,'dungeon',s.icon,s.x,s.y,L.cell*tw*0.96,L.cell*th*0.96,s); } if(s.gm)gmDot(g,s.x+L.cell*0.5,s.y-L.cell*0.5); if(i===sel){ g.save(); g.setLineDash([5,4]); g.strokeStyle='#c9a227'; g.lineWidth=2; g.strokeRect(s.x-L.cell*0.62,s.y-L.cell*0.62,L.cell*1.24,L.cell*1.24); g.restore(); } });
   if(lyr('text')) for(const l of M.labels){ if(!og(l))continue; haloTxt(g,l.x,l.y,l.text,false,13); if(l.gm)gmDot(g,l.x,l.y-12); }
   if(lyr('lines')){ M.drawsD.forEach((d,i)=>{ if(!og(d))return; if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle='#c9a227';g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();} drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); }); if(curStroke&&M.mode==='dun') drawStroke(g,curStroke); }
-  const fb=L.oy+M.rows*L.cell;
   cartouche(g,W/2,52,M.title); compass(g,W-78,150);
-  // key (bottom-right) + ruler (bottom-left) share a bottom line in the margin below the frame — never over rooms
-  const dunUsed=[...new Set(M.syms.filter(s=>s.type!=='key').map(s=>s.icon))].slice(0,7);
-  const legH=48+LEG_RH*(dunUsed.length+1), bottomY=fb+40+legH;
-  legendDun(g, x1-14-LEG_W, bottomY-legH);
-  scalebar(g, x0+14, bottomY-9, L.cell, Math.min(10,M.cols), '1 square = '+fmtScale(M.feetPerSquare||10)+' ft');   // each segment = one grid square
+  // key + ruler sit ON the map (over rock reserved & kept clear at generation), bottoms aligned near the frame floor
+  const a=legendAnchorDun(L);
+  legendDun(g, a.x, a.y);
+  scalebar(g, x0+14, y1-40, L.cell, Math.min(10,M.cols), '1 square = '+fmtScale(M.feetPerSquare||10)+' ft');   // each segment = one grid square
 }
+// in-frame anchors for the key (bottom-right) + reserved footprints (see dunReserve). Fixed LEG_H so the
+// reserve is stable regardless of which symbols the generator ends up placing.
+function legendAnchorDun(L){ const x1=L.ox+M.cols*L.cell, y1=L.oy+M.rows*L.cell; return {x:x1-14-LEG_W, y:y1-14-LEG_H}; }
+function rulerRectDun(L){ const y1=L.oy+M.rows*L.cell; return {x:L.ox+14, y:y1-40, w:Math.min(10,M.cols)*L.cell, h:26}; }
+function dunReserve(L){ const a=legendAnchorDun(L), rb=rulerRectDun(L), boxes=[[a.x,a.y,LEG_W,LEG_H],[rb.x,rb.y,rb.w,rb.h]], set=new Set();
+  for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const cx=L.ox+c*L.cell, cy=L.oy+r*L.cell;
+    for(const[bx,by,bw,bh] of boxes){ if(cx+L.cell>bx && cx<bx+bw && cy+L.cell>by && cy<by+bh){ set.add(c+','+r); break; } } }
+  return set; }
 function legendDun(g,ax,ay){
   const used=[...new Set(M.syms.filter(s=>s.type!=='key').map(s=>s.icon))].slice(0,7);
   const rows=used.map(n=>[(px,py)=>drawIcon(g,'dungeon',n,px,py,30,30),(BY.dungeon[n]?BY.dungeon[n].label:n)]);
   rows.push([(px,py)=>{disc(g,px,py,12,INK);},'keyed area']);
-  legendBox(g,ax,ay,'MAP KEY',rows);
+  legendBox(g,ax,ay,'MAP KEY',rows,LEG_H);
 }
 
 // ---------- tools / palette ----------
@@ -718,6 +724,7 @@ function hexPath(a,b,g,cost){
 function genDun(){
   snap(); M.cells={}; M.syms=[]; M.labels=[]; M.drawsD=[]; sel=-1; selDraw=-1; selLabel=-1;
   const cols=M.cols, rows=M.rows, L=layout(), cc=(c,r)=>[L.ox+(c+0.5)*L.cell,L.oy+(r+0.5)*L.cell];
+  const RES=dunReserve(L), roomHitsRes=(x,y,w,h)=>{ for(let r=y;r<y+h;r++)for(let c=x;c<x+w;c++)if(RES.has(c+','+r))return true; return false; };   // key + ruler footprints kept as rock
   const O=Object.assign({density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'},M.dunOpts||{});
   const CPR={sparse:200,normal:110,dense:72,packed:48}[O.density]||110;            // cells per room → room count scales with grid area (fills large maps)
   const RZ={small:[2,3],medium:[2,5],large:[3,6]}[O.roomSize]||[2,5];
@@ -725,6 +732,7 @@ function genDun(){
   let t=0;
   while(rooms.length<nroom && t++<nroom*45){ const big=O.roomSize==='large'&&rndf()<0.3; const w=RZ[0]+rnd(RZ[1]+(big?2:0)),h=RZ[0]+rnd(RZ[1]+(big?2:0)),x=1+rnd(Math.max(1,cols-w-2)),y=1+rnd(Math.max(1,rows-h-2));
     if(rooms.some(o=>!(x+w+1<o.x||o.x+o.w+1<x||y+h+1<o.y||o.y+o.h+1<y)))continue;
+    if(roomHitsRes(x,y,w,h))continue;   // don't spawn rooms under the key/ruler
     rooms.push({x,y,w,h}); for(let r=y;r<y+h;r++)for(let c=x;c<x+w;c++)M.cells[c+','+r]='floor'; }
   if(!rooms.length){render();save();return;}
   const cx=m=>m.x+m.w/2, cy=m=>m.y+m.h/2, ctr=m=>[Math.floor(cx(m)),Math.floor(cy(m))], rkey=m=>rooms.indexOf(m);
@@ -732,7 +740,7 @@ function genDun(){
   // floor (low cost) so corridors merge into junctions/loops instead of cutting through rooms.
   const DIRS=[[1,0],[-1,0],[0,1],[0,-1]], turnPen=O.corridors==='straight'?1.4:0;     // 'straight' penalises bends → direct corridors; 'winding'/'maze' wander & merge
   const dunPath=(a,b,rai,rbi)=>{ const K=(c,r)=>c+','+r, ak=K(a[0],a[1]), bk=K(b[0],b[1]);
-    const blocked=(c,r)=>{ if(c<0||r<0||c>=cols||r>=rows)return true; for(let i=0;i<rooms.length;i++){ if(i===rai||i===rbi)continue; const m=rooms[i]; if(c>=m.x&&c<m.x+m.w&&r>=m.y&&r<m.y+m.h)return true; } return false; };
+    const blocked=(c,r)=>{ if(c<0||r<0||c>=cols||r>=rows)return true; if(RES.has(c+','+r))return true; for(let i=0;i<rooms.length;i++){ if(i===rai||i===rbi)continue; const m=rooms[i]; if(c>=m.x&&c<m.x+m.w&&r>=m.y&&r<m.y+m.h)return true; } return false; };
     const open=[a], g={[ak]:0}, f={[ak]:0}, came={}, dirOf={[ak]:-1}, inOpen=new Set([ak]), closed=new Set(); let guard=0;
     while(open.length&&guard++<40000){ let bi=0; for(let i=1;i<open.length;i++) if(f[K(open[i][0],open[i][1])]<f[K(open[bi][0],open[bi][1])])bi=i;
       const cur=open.splice(bi,1)[0], ck=K(cur[0],cur[1]); inOpen.delete(ck);
@@ -787,7 +795,7 @@ function genDun(){
   { const cnt = O.corridors==='maze'?Math.round(nroom*1.6) : O.deadends==='keep'?Math.round(nroom*1.1) : O.deadends==='some'?Math.round(nroom*0.45) : 0;
     const corr=[]; for(const k in M.cells){ const[c,r]=k.split(',').map(Number); if(M.cells[k]==='floor'&&roomAt(c,r)===-1) corr.push([c,r]); }
     for(let i=0;i<cnt&&corr.length;i++){ let[c,r]=pick(corr), d=pick(DIRS), len=2+rnd(4);
-      for(let s=0;s<len;s++){ const nc=c+d[0],nr=r+d[1]; if(nc<1||nr<1||nc>=cols-1||nr>=rows-1||roomAt(nc,nr)!==-1||M.cells[nc+','+nr]==='floor')break; M.cells[nc+','+nr]='floor'; c=nc;r=nr; if(rndf()<0.35)d=pick(DIRS); } } }
+      for(let s=0;s<len;s++){ const nc=c+d[0],nr=r+d[1]; if(nc<1||nr<1||nc>=cols-1||nr>=rows-1||roomAt(nc,nr)!==-1||M.cells[nc+','+nr]==='floor'||RES.has(nc+','+nr))break; M.cells[nc+','+nr]='floor'; c=nc;r=nr; if(rndf()<0.35)d=pick(DIRS); } } }
   render(); maybeFit(); save();
 }
 function doGenerate(){ if(!confirm('Generate a random '+(M.mode==='wild'?'wilderness':'dungeon')+'? This replaces the current map.'))return; (M.mode==='wild'?genWild:genDun)(); }

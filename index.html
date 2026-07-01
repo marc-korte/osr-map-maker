@@ -365,18 +365,17 @@ function drawDun(g,W,H){
   if(lyr('lines')){ M.drawsD.forEach((d,i)=>{ if(!og(d))return; if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle='#c9a227';g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();} drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); }); if(curStroke&&M.mode==='dun') drawStroke(g,curStroke); }
   const fb=L.oy+M.rows*L.cell;
   cartouche(g,W/2,52,M.title); compass(g,W-78,150);
-  legendDun(g,{x0,y0,x1,y1},W,H,fb); scalebar(g,360,fb+78,L.cell*4,5,'1 square = '+fmtScale(M.feetPerSquare||10)+' ft');
+  // key (bottom-right) + ruler (bottom-left) share a bottom line in the margin below the frame — never over rooms
+  const dunUsed=[...new Set(M.syms.filter(s=>s.type!=='key').map(s=>s.icon))].slice(0,7);
+  const legH=48+LEG_RH*(dunUsed.length+1), bottomY=fb+40+legH;
+  legendDun(g, x1-14-LEG_W, bottomY-legH);
+  scalebar(g, x0+14, bottomY-9, L.cell, Math.min(10,M.cols), '1 square = '+fmtScale(M.feetPerSquare||10)+' ft');   // each segment = one grid square
 }
-function legendDun(g,b,W,H,fb){
+function legendDun(g,ax,ay){
   const used=[...new Set(M.syms.filter(s=>s.type!=='key').map(s=>s.icon))].slice(0,7);
   const rows=used.map(n=>[(px,py)=>drawIcon(g,'dungeon',n,px,py,30,30),(BY.dungeon[n]?BY.dungeon[n].label:n)]);
   rows.push([(px,py)=>{disc(g,px,py,12,INK);},'keyed area']);
-  const h=48+LEG_RH*rows.length, L=layout();
-  const content=[[W-78,150,99]];                                              // compass = hard obstacle
-  for(const k in M.cells){ if(M.cells[k]==='floor'){ const[c,r]=k.split(',').map(Number); content.push([L.ox+(c+0.5)*L.cell,L.oy+(r+0.5)*L.cell,0.4]); } }
-  for(const s of M.syms) content.push([s.x,s.y,200]);   // symbols/room numbers = hard obstacles
-  const a=pickLegendSpot(LEG_W,h,content,b,{x:40,y:fb+22});
-  legendBox(g,a.x,a.y,'MAP KEY',rows);   // inside the frame where there's room; clean margin if the map is full
+  legendBox(g,ax,ay,'MAP KEY',rows);
 }
 
 // ---------- tools / palette ----------

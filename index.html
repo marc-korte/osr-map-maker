@@ -45,7 +45,7 @@
   <label class="num">cols <input type="number" id="cols" value="9" min="3" max="120"></label>
   <label class="num">rows <input type="number" id="rows" value="12" min="3" max="120"></label>
   <label class="num" id="scaleLbl">miles/hex <input type="number" id="scale" value="1" min="0.1" step="0.5" title="Map scale: miles per hex (wilderness) / feet per square (dungeon)"></label>
-  <button id="resize">Resize</button><button id="gen" title="Generate a random map for this mode">Generate</button><button id="undo" title="Ctrl+Z">Undo</button><button id="clear">Clear</button>
+  <button id="undo" title="Ctrl+Z">Undo</button><button id="clear">Clear</button>
   <button id="save">Save .json</button><button id="load">Load</button><input type="file" id="file" accept=".json" style="display:none">
   <button id="view" title="Toggle GM / Player view">GM view</button>
   <button id="zoomout" title="Zoom out (−)">&minus;</button><button id="zoomlbl" title="Reset zoom to 100%">100%</button><button id="zoomin" title="Zoom in (+)">+</button><button id="zoomfit" title="Fit map to window">Fit</button>
@@ -55,7 +55,7 @@
   <aside id="tools"></aside>
   <div class="canvaswrap"><div class="canvaspad"><canvas id="cv" width="1000" height="1320"></canvas></div></div>
 </main>
-<footer id="help"><b>Select/Move</b> drags symbols, hexes <i>and</i> rivers/roads/trails/borders (selected = gold); <kbd>R</kbd><kbd>H</kbd><kbd>V</kbd><kbd>I</kbd> transform, <kbd>Del</kbd> removes. <b>Draw River/Road/Trail/Border</b> are freehand (drag); <b>Border edge</b> snaps to hex edges. <b>Snap to grid</b> aligns dungeon symbols. ¼-inch squares, export = 300 dpi. <kbd>Esc</kbd> cancels a stroke, <kbd>Ctrl+Z</kbd> undo. <b>Pan</b> hold <kbd>Space</kbd> or drag empty space with <b>Select/Move</b> (middle-drag too). <b>Zoom</b> <kbd>+</kbd><kbd>−</kbd> or Ctrl+wheel (pinch on touch), <kbd>0</kbd> resets, <b>Fit</b> sizes to window. On touch, drag = draw, two fingers = pan &amp; zoom.</footer>
+<footer id="help"><b>Select/Move</b> drags symbols, names <i>and</i> rivers/roads/trails/borders (selected = gold); <kbd>R</kbd><kbd>H</kbd><kbd>V</kbd><kbd>I</kbd> transform, <kbd>Del</kbd> removes. Drag the map itself to pan. <b>Draw River/Road/Trail/Border</b> are freehand (drag); <b>Border edge</b> snaps to hex edges. <b>Snap to grid</b> aligns dungeon symbols. ¼-inch squares, export = 300 dpi. <kbd>Esc</kbd> cancels a stroke, <kbd>Ctrl+Z</kbd> undo. <b>Pan</b> hold <kbd>Space</kbd> or drag empty space with <b>Select/Move</b> (middle-drag too). <b>Zoom</b> <kbd>+</kbd><kbd>−</kbd> or Ctrl+wheel (pinch on touch), <kbd>0</kbd> resets, <b>Fit</b> sizes to window. On touch, drag = draw, two fingers = pan &amp; zoom.</footer>
 
 <script src="icons.js"></script>
 <script>
@@ -80,6 +80,7 @@ function zoomFit(){ if(!LW||!LH){render();} zoom=Math.max(0.02,Math.min(8,Math.m
 function maybeFit(){ if(LW*zoom>cwrap.clientWidth||LH*zoom>cwrap.clientHeight) zoomFit(); }
 function panBy(dxCss,dyCss){ panX-=dxCss/zoom; panY-=dyCss/zoom; render(); }   // dxCss/dyCss in CSS px
 const GRID='#c7c7c7', INK='#000', PAP='#fff', GREY='#dedede', WATERC='#c4c4c4';
+const LEG_W=222, LEG_RH=30;   // legend box width + row height (compact → fits inside more maps)
 const SS=3;                 // export supersample -> 300 dpi when 100 logical px = 1 inch
 const PPI=100;              // logical pixels per inch
 const DUN_CELL=PPI/4;       // dungeon square = 1/4 inch (25 logical px)
@@ -157,7 +158,20 @@ function cartouche(g,cx,y,t){ const w=Math.max(360,t.length*18+120),h=52; g.fill
 function compass(g,x,y){ disc(g,x,y,28,null,INK,1.6); poly(g,[[x,y-24],[x-8,y+5],[x,y],[x+8,y+5]],INK); poly(g,[[x,y+24],[x-8,y-5],[x,y],[x+8,y-5]],null,INK,1.2); txt(g,x,y-40,'N',16,true,INK); }
 function scalebar(g,x,y,unit,n,lab){ for(let i=0;i<n;i++){g.fillStyle=i%2?PAP:INK;g.fillRect(x+i*unit,y,unit,9);g.strokeStyle=INK;g.lineWidth=1;g.strokeRect(x+i*unit,y,unit,9);} txt(g,x+n*unit/2,y+22,lab,13,false,INK); }
 function fmtScale(v){ v=+v; if(!Number.isFinite(v)||v<=0)v=1; return (Math.round(v*100)/100).toString(); }
-function legendBox(g,x,y,title,rows){ const w=276,rh=40,h=58+rh*rows.length; g.fillStyle=PAP;g.fillRect(x,y,w,h);g.strokeStyle=INK;g.lineWidth=2;g.strokeRect(x,y,w,h);g.lineWidth=1;g.strokeRect(x+5,y+5,w-10,h-10); txt(g,x+w/2,y+28,title,16,true,INK); let yy=y+60; for(const[icon,label]of rows){ icon(x+38,yy); txt(g,x+70,yy,label,14,null,INK,'left'); yy+=rh; } }
+function legendBox(g,x,y,title,rows){ const w=LEG_W,rh=LEG_RH,h=48+rh*rows.length; g.fillStyle=PAP;g.fillRect(x,y,w,h);g.strokeStyle=INK;g.lineWidth=2;g.strokeRect(x,y,w,h);g.lineWidth=1;g.strokeRect(x+5,y+5,w-10,h-10); txt(g,x+w/2,y+24,title,15,true,INK); let yy=y+50; for(const[icon,label]of rows){ icon(x+34,yy); txt(g,x+60,yy,label,13,null,INK,'left'); yy+=rh; } }
+// pick a top-left anchor for a legend box so it covers the least map content: try the four inner corners of
+// the map area, fall back to the outside margin only if every corner would sit on real content.
+function pickLegendSpot(w,h,content,b,margin){
+  const pad=14, x0=b.x0+pad, y0=b.y0+pad, xM=b.x1-pad-w, yM=b.y1-pad-h;
+  const score=(x,y)=>{ let s=0; for(const p of content){ if(p[0]>=x&&p[0]<=x+w&&p[1]>=y&&p[1]<=y+h){ s+=p[2]; if(s>60)return s; } } return s; };
+  let best=null, bs=1e18, bcorn=-1;
+  if(xM>=x0&&yM>=y0){ const cx=(b.x0+b.x1)/2, cy=(b.y0+b.y1)/2, sx=Math.max(28,(xM-x0)/12), sy=Math.max(28,(yM-y0)/12);
+    const try_=(x,y)=>{ const s=score(x,y), corn=(x+w/2-cx)**2+(y+h/2-cy)**2; if(s<bs||(s===bs&&corn>bcorn)){bs=s;best={x,y};bcorn=corn;} };
+    for(let y=y0;y<=yM+1;y+=sy)for(let x=x0;x<=xM+1;x+=sx) try_(x,y);       // grid scan → find any clear rectangle, prefer cornermost
+    try_(x0,yM); try_(xM,yM); try_(x0,y0); try_(xM,y0); }                    // exact corners too
+  if(margin){ const ms=score(margin.x,margin.y); if(!best || (bs>6 && ms<bs)) return {x:margin.x,y:margin.y}; }   // in-map when it clips ≤6 corridor cells & no room/symbol; else clean margin
+  return best;
+}
 function haloTxt(g,x,y,t,bold,px){ if(!t)return; g.font=(bold?'bold ':'italic ')+px+'px '+(bold?'Arial':'Georgia,serif'); g.textAlign='center'; g.textBaseline='middle';
   g.save(); g.lineJoin='round'; g.miterLimit=2; g.strokeStyle=PAP; g.lineWidth=px*0.3; g.strokeText(t,x,y); g.restore();   // white glyph outline = transparent background, still legible over lakes/symbols
   g.fillStyle=INK; g.fillText(t,x,y); }
@@ -247,7 +261,7 @@ function drawGhost(){ if(hoverX==null)return; const L=layout(); ctx.save(); ctx.
   if(M.mode==='dun'){
     if(tool==='stamp'&&curIcon&&pickCell(hoverX,hoverY,L)){ const[tw,th]=tiles(curIcon),[sx,sy]=snapPt(hoverX,hoverY,L); drawIconT(ctx,'dungeon',curIcon,sx,sy,L.cell*tw*0.96,L.cell*th*0.96,stampT); }
     else if(tool==='floor'||tool==='rock'){ const c=pickCell(hoverX,hoverY,L); if(c){ ctx.globalAlpha=0.3; ctx.fillStyle=(tool==='floor'?'#2a7':'#b33'); ctx.fillRect(L.ox+c[0]*L.cell,L.oy+c[1]*L.cell,L.cell,L.cell);} }
-    else if(tool==='key'){ disc(ctx,hoverX,hoverY,15,INK); }
+    else if(tool==='key'){ disc(ctx,hoverX,hoverY,11,INK); }
   } else if(M.mode==='wild'){
     if(tool==='terrain'&&curIcon){ const hx=pickHex(hoverX,hoverY,L); if(hx){const[x,y]=hcenter(hx[0],hx[1],L); drawIconT(ctx,'hex',curIcon,x,y,L.size*1.68,L.size*1.52,stampT);} }
     else if(tool==='borderedge'){ const hx=pickHex(hoverX,hoverY,L); if(hx){ const[cx,cy]=hcenter(hx[0],hx[1],L),cs=hcorners(cx,cy,L.size); let bi=0,bd=1e9; for(let i=0;i<6;i++){const a=cs[i],b=cs[(i+1)%6],mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2,dd=(mx-hoverX)**2+(my-hoverY)**2; if(dd<bd){bd=dd;bi=i;}} const a=cs[bi],b=cs[(bi+1)%6]; ctx.globalAlpha=0.85; ctx.strokeStyle='#c9a227'; ctx.lineWidth=4; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); } }
@@ -286,15 +300,22 @@ function drawWild(g,W,H){
     if(lyr('text')) placeLabels(g,reqs,placed); }
   if(selHex&&M.hex[selHex]){ const p=selHex.split(',').map(Number),[x,y]=hcenter(p[0],p[1],L); g.save(); g.setLineDash([5,4]); poly(g,hcorners(x,y,L.size*0.94),null,'#c9a227',2); g.restore(); }
   cartouche(g,W/2,52,M.title); compass(g,W-78,150); scalebar(g,120,H-78,L.hw,Math.min(6,M.cols),'1 hex ≈ '+fmtScale(M.milesPerHex||1)+' mile'+((M.milesPerHex||1)==1?'':'s'));
-  legendWild(g,W-300,H);
+  const fieldL=L.ox-L.hw*0.5, fieldR=L.ox+L.hw*M.cols, fieldT=L.oy-L.size, fieldB=L.oy+1.5*L.size*(M.rows-1)+L.size;
+  legendWild(g,{x0:fieldL,y0:fieldT,x1:fieldR,y1:fieldB},W,H);
 }
-function legendWild(g,x,H){
+function legendWild(g,b,W,H){
   const used=[...new Set(Object.values(M.hex).map(t=>typeof t==='string'?t:t.n))].filter(n=>n&&n!=='Blank').slice(0,7);
   const rows=used.map(n=> n==='Water'
     ? [(px,py)=>{ g.fillStyle=WATERC; g.fillRect(px-13,py-11,26,22); g.strokeStyle=INK; g.lineWidth=1; g.strokeRect(px-13,py-11,26,22); }, 'Water']
     : [(px,py)=>drawIcon(g,'hex',n,px,py,34,34), (BY.hex[n]?BY.hex[n].label:n)]);
   rows.push([(px,py)=>{disc(g,px,py,12,INK);},'keyed site']);
-  legendBox(g,x,H-58-40*rows.length-20,'LEGEND',rows);
+  const h=48+LEG_RH*rows.length, L=layout();
+  const content=[[W-78,150,99]];                                              // compass = hard obstacle
+  for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const t=M.hex[c+','+r]; if(!t)continue; const n=typeof t==='string'?t:t.n; const wt=n==='Blank'?0:n==='Water'?0.3:1; if(wt){const[x,y]=hcenter(c,r,L); content.push([x,y,wt]);} }
+  for(const s of M.sites){ const[x,y]=hcenter(s.c,s.r,L); content.push([x,y,30]); }
+  for(const d of M.drawsW) if(d.pts) for(let i=0;i<d.pts.length;i+=3) content.push([d.pts[i][0],d.pts[i][1],1]);
+  const a=pickLegendSpot(LEG_W,h,content,b,{x:W-LEG_W-24,y:H-h-20});
+  legendBox(g,a.x,a.y,'LEGEND',rows);
 }
 
 function drawDun(g,W,H){
@@ -313,18 +334,23 @@ function drawDun(g,W,H){
   g.strokeStyle=INK;g.lineWidth=2.6;g.strokeRect(x0,y0,x1-x0,y1-y0);
   }
   let kn=0; M.syms.forEach(s=>{ if(s.type==='key'){kn++; s.n=kn;} });
-  M.syms.forEach((s,i)=>{ const isKey=s.type==='key'; const on=(isKey?lyr('keys'):lyr('symbols'))&&og(s); if(!on)return; if(isKey){ disc(g,s.x,s.y,15,INK); txt(g,s.x,s.y,String(s.n||'#'),15,true,PAP); } else { const[tw,th]=tiles(s.icon); drawIconT(g,'dungeon',s.icon,s.x,s.y,L.cell*tw*0.96,L.cell*th*0.96,s); } if(s.gm)gmDot(g,s.x+L.cell*0.5,s.y-L.cell*0.5); if(i===sel){ g.save(); g.setLineDash([5,4]); g.strokeStyle='#c9a227'; g.lineWidth=2; g.strokeRect(s.x-L.cell*0.62,s.y-L.cell*0.62,L.cell*1.24,L.cell*1.24); g.restore(); } });
+  M.syms.forEach((s,i)=>{ const isKey=s.type==='key'; const on=(isKey?lyr('keys'):lyr('symbols'))&&og(s); if(!on)return; if(isKey){ const t=String(s.n||'#'), kr=t.length>1?11:10; disc(g,s.x,s.y,kr,INK); txt(g,s.x,s.y,t,kr*1.05,true,PAP); } else { const[tw,th]=tiles(s.icon); drawIconT(g,'dungeon',s.icon,s.x,s.y,L.cell*tw*0.96,L.cell*th*0.96,s); } if(s.gm)gmDot(g,s.x+L.cell*0.5,s.y-L.cell*0.5); if(i===sel){ g.save(); g.setLineDash([5,4]); g.strokeStyle='#c9a227'; g.lineWidth=2; g.strokeRect(s.x-L.cell*0.62,s.y-L.cell*0.62,L.cell*1.24,L.cell*1.24); g.restore(); } });
   if(lyr('text')) for(const l of M.labels){ if(!og(l))continue; haloTxt(g,l.x,l.y,l.text,false,13); if(l.gm)gmDot(g,l.x,l.y-12); }
   if(lyr('lines')){ M.drawsD.forEach((d,i)=>{ if(!og(d))return; if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle='#c9a227';g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();} drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); }); if(curStroke&&M.mode==='dun') drawStroke(g,curStroke); }
   const fb=L.oy+M.rows*L.cell;
   cartouche(g,W/2,52,M.title); compass(g,W-78,150);
-  legendDun(g,40,fb+22); scalebar(g,360,fb+78,L.cell*4,5,'1 square = '+fmtScale(M.feetPerSquare||10)+' ft');
+  legendDun(g,{x0,y0,x1,y1},W,H,fb); scalebar(g,360,fb+78,L.cell*4,5,'1 square = '+fmtScale(M.feetPerSquare||10)+' ft');
 }
-function legendDun(g,x,y){
+function legendDun(g,b,W,H,fb){
   const used=[...new Set(M.syms.filter(s=>s.type!=='key').map(s=>s.icon))].slice(0,7);
   const rows=used.map(n=>[(px,py)=>drawIcon(g,'dungeon',n,px,py,30,30),(BY.dungeon[n]?BY.dungeon[n].label:n)]);
   rows.push([(px,py)=>{disc(g,px,py,12,INK);},'keyed area']);
-  legendBox(g,x,y,'MAP KEY',rows);
+  const h=48+LEG_RH*rows.length, L=layout();
+  const content=[[W-78,150,99]];                                              // compass = hard obstacle
+  for(const k in M.cells){ if(M.cells[k]==='floor'){ const[c,r]=k.split(',').map(Number); content.push([L.ox+(c+0.5)*L.cell,L.oy+(r+0.5)*L.cell,1]); } }
+  for(const s of M.syms) content.push([s.x,s.y,30]);
+  const a=pickLegendSpot(LEG_W,h,content,b,{x:40,y:fb+22});
+  legendBox(g,a.x,a.y,'MAP KEY',rows);   // inside the frame where there's room; clean margin if the map is full
 }
 
 // ---------- tools / palette ----------
@@ -335,6 +361,20 @@ function buildTools(){
     ? [['water','Water (grey)'],['erasehex','Erase hex'],['site','Keyed site'],['select','Select/Move'],['drawriver','Draw River'],['drawroad','Draw Road'],['drawtrail','Draw Trail'],['borderedge','Border'],['eraseline','Erase line']]
     : [['floor','Floor'],['rock','Rock'],['select','Select/Move'],['drawriver','River'],['drawroad','Road'],['drawtrail','Trail'],['drawborder','Border'],['key','Keyed #'],['label','Label'],['erase','Erase'],['eraseline','Erase line']];
   for(const[id,lab]of btns){ const b=document.createElement('button'); b.className='tool'+(tool===id?' on':''); b.textContent=lab; b.onclick=()=>{ tool=id; buildTools(); }; a.appendChild(b); }
+  { const h3=document.createElement('h3'); h3.textContent=(M.mode==='dun'?'Generate options':'Generate'); a.appendChild(h3);
+    if(M.mode==='dun'){ M.dunOpts=Object.assign({density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'},M.dunOpts||{});   // donjon-style generate options
+      const sel=(key,label,vals)=>{ const w=document.createElement('label'); w.className='num'; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode(label));
+        const s=document.createElement('select'); s.style.cssText='flex:1;background:#111;color:#eee;border:1px solid #555;border-radius:4px;padding:3px;font-size:12px;';
+        for(const[v,tt]of vals){ const o=document.createElement('option'); o.value=v; o.textContent=tt; if(M.dunOpts[key]===v)o.selected=true; s.appendChild(o); }
+        s.onchange=()=>{ M.dunOpts[key]=s.value; save(); }; w.appendChild(s); a.appendChild(w); };
+      sel('density','Density',[['sparse','Sparse'],['normal','Normal'],['dense','Dense'],['packed','Packed']]);
+      sel('roomSize','Room size',[['small','Small'],['medium','Medium'],['large','Large']]);
+      sel('corridors','Corridors',[['straight','Straight'],['winding','Winding'],['maze','Maze']]);
+      sel('deadends','Dead-ends',[['all','Trim all'],['some','Trim some'],['keep','Keep all']]);
+      sel('stairs','Stairs',[['yes','Yes'],['no','No']]); }
+    const gen=document.createElement('button'); gen.textContent='Generate'; gen.style.cssText='width:100%;margin-top:6px;background:var(--hl);color:#111;font-weight:700;padding:8px;'; gen.onclick=doGenerate; a.appendChild(gen);
+    const tip=document.createElement('div'); tip.style.cssText='font-size:11px;color:#999;margin:4px 0'; tip.textContent=(M.mode==='dun'?'Density fills large grids. ':'')+'Replaces the current map.'; a.appendChild(tip);
+  }
   { const h3=document.createElement('h3'); h3.textContent='Transform'; a.appendChild(h3);
     if(M.mode==='dun'){ const gb=document.createElement('button'); gb.className='tool'+(M.gridBg?' on':''); gb.textContent='Grid background'; gb.onclick=()=>{M.gridBg=!M.gridBg;render();save();buildTools();}; a.appendChild(gb);
       const sb=document.createElement('button'); sb.className='tool'+(M.snap?' on':''); sb.textContent='Snap to grid'; sb.onclick=()=>{M.snap=!M.snap;save();buildTools();}; a.appendChild(sb); }
@@ -389,7 +429,7 @@ function apply(px,py,first){
   if(M.mode==='wild'){
     if(tool==='terrain'||tool==='erasehex'||tool==='water'){ const hx=pickHex(px,py,L); if(hx){ if(first)snap(); const k=hx[0]+','+hx[1]; if(tool==='erasehex')delete M.hex[k]; else if(tool==='water')M.hex[k]='Water'; else M.hex[k]={n:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}; } }
     else if(tool==='select'){
-      if(first){ snap(); selHex=null; selDraw=-1; selSite=-1; dragging=null; dragPrev={x:px,y:py}; let bi=-1,bd=900; M.sites.forEach((s,i)=>{const[x,y]=hcenter(s.c,s.r,L);const d=(x-px)**2+(y-py)**2;if(d<bd){bd=d;bi=i;}}); if(bi>=0){selSite=bi; dragging={k:'site',i:bi};} else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};} else { const hx=pickHex(px,py,L); if(hx&&M.hex[hx[0]+','+hx[1]]){selHex=hx[0]+','+hx[1]; dragging={k:'hex'};} } } buildTools(); }
+      if(first){ snap(); selHex=null; selDraw=-1; selSite=-1; dragging=null; dragPrev={x:px,y:py}; let bi=-1,bd=900; M.sites.forEach((s,i)=>{const[x,y]=hcenter(s.c,s.r,L);const d=(x-px)**2+(y-py)**2;if(d<bd){bd=d;bi=i;}}); if(bi>=0){selSite=bi; dragging={k:'site',i:bi};} else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};} else { const hx=pickHex(px,py,L); if(hx&&M.hex[hx[0]+','+hx[1]]){selHex=hx[0]+','+hx[1];} } } buildTools(); }   // select a hex (for Del/G) but DON'T grab it → empty/terrain drag falls through to pan, like the dungeon
       else if(dragging){ if(dragging.k==='draw'){ const d=curDraws()[dragging.i]; if(d){const dx=px-dragPrev.x,dy=py-dragPrev.y; for(const p of d.pts){p[0]+=dx;p[1]+=dy;}} dragPrev={x:px,y:py}; } else { const hx=pickHex(px,py,L); if(hx){ if(dragging.k==='site'){M.sites[dragging.i].c=hx[0];M.sites[dragging.i].r=hx[1];} else if(dragging.k==='hex'){ const nk=hx[0]+','+hx[1]; if(nk!==selHex){ M.hex[nk]=M.hex[selHex]; delete M.hex[selHex]; selHex=nk; } } } } }
     }
     else if(!first)return;
@@ -461,7 +501,9 @@ document.getElementById('tabWild').onclick=()=>setMode('wild');
 document.getElementById('tabDun').onclick=()=>setMode('dun');
 document.getElementById('undo').onclick=undo;
 document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; snap(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.curRoad=null;M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); };
-document.getElementById('resize').onclick=()=>{ const c=Math.max(3,Math.min(120,+document.getElementById('cols').value)), r=Math.max(3,Math.min(120,+document.getElementById('rows').value)); M.cols=c; M.rows=r; if(M.mode==='wild'){M.colsW=c;M.rowsW=r;}else{M.colsD=c;M.rowsD=r;} render(); maybeFit(); save(); };
+function applyResize(){ const c=Math.max(3,Math.min(120,+document.getElementById('cols').value||3)), r=Math.max(3,Math.min(120,+document.getElementById('rows').value||3)); document.getElementById('cols').value=c; document.getElementById('rows').value=r; M.cols=c; M.rows=r; if(M.mode==='wild'){M.colsW=c;M.rowsW=r;}else{M.colsD=c;M.rowsD=r;} render(); maybeFit(); save(); }
+document.getElementById('cols').addEventListener('change',applyResize);   // auto-resize on commit (Enter/blur) — no Resize button
+document.getElementById('rows').addEventListener('change',applyResize);
 document.getElementById('save').onclick=()=>{ readTitle(); const b=new Blob([JSON.stringify(M)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=(M.title||'map').replace(/\W+/g,'_')+'.json'; a.click(); };
 document.getElementById('load').onclick=()=>document.getElementById('file').click();
 document.getElementById('file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{Object.assign(M,JSON.parse(rd.result)); document.getElementById('cols').value=M.cols;document.getElementById('rows').value=M.rows; setMode(M.mode||'wild');}catch(err){alert('Bad file');} }; rd.readAsText(f); };
@@ -604,7 +646,7 @@ function genWild(){
   const hi=[]; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ const e=elevOf(g[c+','+r]); if(e>=3)hi.push([c,r,e+Math.min(c,cols-1-c,r,rows-1-r)*1.6]); }
   if(!hi.length)for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ if(g[c+','+r]!=='Water')hi.push([c,r,Math.min(c,cols-1-c,r,rows-1-r)*1.6]); } // flat map: source from the most inland land
   const waters=[]; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) if(g[c+','+r]==='Water') waters.push([c,r]);
-  const rcostR=(c,r)=>{ const tt=g[c+','+r]; return tt==='Water'?0.15:1+elevOf(tt)*1.6; };       // strongly prefer low ground, pour into water
+  const rcostR=(c,r)=>{ const tt=g[c+','+r]; return tt==='Water'?0.15:1+elevOf(tt)*0.6; };       // mild low-ground preference → rivers flow toward the sea without big detours
   if(hi.length){ hi.sort((a,b)=>b[2]-a[2]);                                                       // more, spaced rivers on bigger maps; each runs source → nearest sea
     const nriv=Math.min(6,Math.max(1,Math.round(cols*rows/350))), used=[], minSep=Math.max(3,Math.max(cols,rows)*0.18);
     for(let ri=0; ri<hi.length && used.length<nriv; ri++){ const src=hi[ri];
@@ -613,7 +655,7 @@ function genWild(){
       for(const w of waters){ const d=Math.abs(w[0]-src[0])+Math.abs(w[1]-src[1]); if(d>1&&d<bd){bd=d;tgt=w;} }
       if(!tgt){ bd=1e18; for(const e of [[0,src[1]],[cols-1,src[1]],[src[0],0],[src[0],rows-1]]){ const d=Math.abs(e[0]-src[0])+Math.abs(e[1]-src[1]); if(d<bd){bd=d;tgt=e;} } }
       const rp=tgt&&hexPath([src[0],src[1]],tgt,g,rcostR);
-      if(rp&&rp.length>2){ const pts=smoothStroke(simplifyDP(edgeRoute(rp,L),L.size*0.5)), mhx=pickHex(pts[pts.length-1][0],pts[pts.length-1][1],L);   // precompute name anchor + mouth so render() never re-scans the whole grid
+      if(rp&&rp.length>2){ const pts=smoothStroke(simplifyDP(rp.map(h=>hcenter(h[0],h[1],L)),L.size*0.45)), mhx=pickHex(pts[pts.length-1][0],pts[pts.length-1][1],L);   // route through hex CENTRES (clean flow, no corner zigzag); precompute name anchor + mouth
         M.drawsW.push({pts,kind:'river',name:genPlaceName()+' River',nameIdx:riverNamePt(pts),mouthWater:!!(mhx&&M.hex[mhx[0]+','+mhx[1]]==='Water')}); used.push(src); } } }
   // name notable water bodies — flood-fill connected Water hexes; large ones get a sea/lake name at their centroid
   { const seen=new Set();
@@ -645,36 +687,79 @@ function hexPath(a,b,g,cost){
 function genDun(){
   snap(); M.cells={}; M.syms=[]; M.labels=[]; M.drawsD=[]; sel=-1; selDraw=-1; selLabel=-1;
   const cols=M.cols, rows=M.rows, L=layout(), cc=(c,r)=>[L.ox+(c+0.5)*L.cell,L.oy+(r+0.5)*L.cell];
-  const rooms=[], nroom=Math.min(14,Math.max(5,Math.round(cols*rows/70)));
+  const O=Object.assign({density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'},M.dunOpts||{});
+  const CPR={sparse:200,normal:110,dense:72,packed:48}[O.density]||110;            // cells per room → room count scales with grid area (fills large maps)
+  const RZ={small:[2,3],medium:[2,5],large:[3,6]}[O.roomSize]||[2,5];
+  const rooms=[], nroom=Math.max(4,Math.min(140,Math.round(cols*rows/CPR)));
   let t=0;
-  while(rooms.length<nroom && t++<500){ const w=2+rnd(5),h=2+rnd(5),x=1+rnd(Math.max(1,cols-w-2)),y=1+rnd(Math.max(1,rows-h-2));
+  while(rooms.length<nroom && t++<nroom*45){ const big=O.roomSize==='large'&&rndf()<0.3; const w=RZ[0]+rnd(RZ[1]+(big?2:0)),h=RZ[0]+rnd(RZ[1]+(big?2:0)),x=1+rnd(Math.max(1,cols-w-2)),y=1+rnd(Math.max(1,rows-h-2));
     if(rooms.some(o=>!(x+w+1<o.x||o.x+o.w+1<x||y+h+1<o.y||o.y+o.h+1<y)))continue;
     rooms.push({x,y,w,h}); for(let r=y;r<y+h;r++)for(let c=x;c<x+w;c++)M.cells[c+','+r]='floor'; }
   if(!rooms.length){render();save();return;}
-  const cx=m=>m.x+m.w/2, cy=m=>m.y+m.h/2;
-  const conn=[rooms[0]], rest=rooms.slice(1);
-  while(rest.length){ let bj=0,bd=1e18; rest.forEach((b,j)=>conn.forEach(a=>{const d=(cx(a)-cx(b))**2+(cy(a)-cy(b))**2; if(d<bd){bd=d;bj=j;}})); const b=rest[bj]; let a=conn[0],ad=1e18; conn.forEach(z=>{const d=(cx(z)-cx(b))**2+(cy(z)-cy(b))**2; if(d<ad){ad=d;a=z;}}); carveCorr(Math.floor(cx(a)),Math.floor(cy(a)),Math.floor(cx(b)),Math.floor(cy(b))); conn.push(b); rest.splice(bj,1); }
-  placeDoors(rooms,cc);
-  let far=rooms[0],fd=-1; rooms.forEach(m=>{const d=(cx(m)-cx(rooms[0]))**2+(cy(m)-cy(rooms[0]))**2; if(d>fd){fd=d;far=m;}});
-  // orient each flight along its corridor: long(up) end toward the room's nearest door
-  const stRot=m=>{ const rx=L.ox+cx(m)*L.cell, ry=L.oy+cy(m)*L.cell; let dx=0,dy=0,bd=1e18; for(const s of M.syms){ if(s.icon==='Door1x1'){ const d=(s.x-rx)**2+(s.y-ry)**2; if(d<bd){bd=d;dx=s.x-rx;dy=s.y-ry;} } } if(bd>1e17)return 0; return Math.abs(dx)>=Math.abs(dy)?(dx<0?0:180):(dy<0?90:270); };
-  const upc=cc(Math.floor(cx(rooms[0])),Math.floor(cy(rooms[0]))), dnc=cc(Math.floor(cx(far)),Math.floor(cy(far)));
-  M.syms.push({x:upc[0],y:upc[1],icon:dnm('StairsFlight1x1','Stairs1x1_01'),rot:stRot(rooms[0])});
-  M.syms.push({x:dnc[0],y:dnc[1],icon:dnm('StairsFlight1x1','Stairs1x1_01'),rot:(stRot(far)+180)%360});
+  const cx=m=>m.x+m.w/2, cy=m=>m.y+m.h/2, ctr=m=>[Math.floor(cx(m)),Math.floor(cy(m))], rkey=m=>rooms.indexOf(m);
+  // corridor router: A* that routes AROUND every room except the two endpoints, and prefers existing
+  // floor (low cost) so corridors merge into junctions/loops instead of cutting through rooms.
+  const DIRS=[[1,0],[-1,0],[0,1],[0,-1]], turnPen=O.corridors==='straight'?1.4:0;     // 'straight' penalises bends → direct corridors; 'winding'/'maze' wander & merge
+  const dunPath=(a,b,rai,rbi)=>{ const K=(c,r)=>c+','+r, ak=K(a[0],a[1]), bk=K(b[0],b[1]);
+    const blocked=(c,r)=>{ if(c<0||r<0||c>=cols||r>=rows)return true; for(let i=0;i<rooms.length;i++){ if(i===rai||i===rbi)continue; const m=rooms[i]; if(c>=m.x&&c<m.x+m.w&&r>=m.y&&r<m.y+m.h)return true; } return false; };
+    const open=[a], g={[ak]:0}, f={[ak]:0}, came={}, dirOf={[ak]:-1}, inOpen=new Set([ak]), closed=new Set(); let guard=0;
+    while(open.length&&guard++<40000){ let bi=0; for(let i=1;i<open.length;i++) if(f[K(open[i][0],open[i][1])]<f[K(open[bi][0],open[bi][1])])bi=i;
+      const cur=open.splice(bi,1)[0], ck=K(cur[0],cur[1]); inOpen.delete(ck);
+      if(ck===bk){ const p=[cur]; let k=ck; while(came[k]){ const pk=came[k]; p.unshift(pk.split(',').map(Number)); k=pk; } return p; }
+      closed.add(ck);
+      for(let di=0;di<4;di++){ const nc=cur[0]+DIRS[di][0],nr=cur[1]+DIRS[di][1]; if(blocked(nc,nr))continue; const nk=K(nc,nr); if(closed.has(nk))continue;
+        const ng=g[ck]+(M.cells[nk]==='floor'?0.4:1)+((dirOf[ck]>=0&&dirOf[ck]!==di)?turnPen:0);
+        if(g[nk]===undefined||ng<g[nk]){ came[nk]=ck; dirOf[nk]=di; g[nk]=ng; f[nk]=ng+Math.abs(nc-b[0])+Math.abs(nr-b[1]); if(!inOpen.has(nk)){open.push([nc,nr]);inOpen.add(nk);} } } }
+    return [a,b]; };
+  // connection graph: nearest-neighbour MST + a few loops
+  const edges=[], conn=[0], rest=rooms.map((_,i)=>i).filter(i=>i>0);
+  while(rest.length){ let bj=0,bi2=0,bd=1e18; rest.forEach((bIdx,j)=>conn.forEach(aIdx=>{const d=(cx(rooms[aIdx])-cx(rooms[bIdx]))**2+(cy(rooms[aIdx])-cy(rooms[bIdx]))**2; if(d<bd){bd=d;bj=j;bi2=aIdx;}})); edges.push([bi2,rest[bj]]); conn.push(rest[bj]); rest.splice(bj,1); }
+  const hasEdge=(a,b)=>edges.some(e=>(e[0]===a&&e[1]===b)||(e[0]===b&&e[1]===a));
+  { const pairs=[]; for(let i=0;i<rooms.length;i++)for(let j=i+1;j<rooms.length;j++) if(!hasEdge(i,j)) pairs.push([i,j,(cx(rooms[i])-cx(rooms[j]))**2+(cy(rooms[i])-cy(rooms[j]))**2]); pairs.sort((p,q)=>p[2]-q[2]); for(let k=0;k<Math.min(pairs.length,Math.ceil(rooms.length/5));k++) edges.push([pairs[k][0],pairs[k][1]]); }
+  for(const[a,b]of edges){ for(const[c,r]of dunPath(ctr(rooms[a]),ctr(rooms[b]),a,b)) M.cells[c+','+r]='floor'; }
+  // DOORWAYS: a room-perimeter floor cell whose adjacent OUTSIDE cell is a corridor (floor, not in any room).
+  // Group consecutive ones per side → one door, flanked by wall (corridors are 1-wide). Variety on ~18%.
+  const roomAt=(c,r)=>{ for(let i=0;i<rooms.length;i++){const m=rooms[i]; if(c>=m.x&&c<m.x+m.w&&r>=m.y&&r<m.y+m.h)return i;} return -1; };
+  const isCorr=(c,r)=>M.cells[c+','+r]==='floor'&&roomAt(c,r)===-1, isFloor=(c,r)=>M.cells[c+','+r]==='floor';
+  const SPECIAL=['DoorArchway1x1','DoorLocked1x1','DoorPortcullis1x1','DoorSecret1x1','DoorDouble1x1'].filter(n=>BY.dungeon[n]);
+  const doorMouth=new Set();   // room-edge cells that carry a door → keep symbols off them
+  for(const m of rooms){ const sides=[
+      {cells:Array.from({length:m.w},(_,i)=>[m.x+i,m.y]),       out:(c,r)=>[c,r-1], rot:0},
+      {cells:Array.from({length:m.w},(_,i)=>[m.x+i,m.y+m.h-1]), out:(c,r)=>[c,r+1], rot:0},
+      {cells:Array.from({length:m.h},(_,i)=>[m.x,m.y+i]),       out:(c,r)=>[c-1,r], rot:90},
+      {cells:Array.from({length:m.h},(_,i)=>[m.x+m.w-1,m.y+i]), out:(c,r)=>[c+1,r], rot:90} ];
+    for(const side of sides){ let run=[];
+      const flush=()=>{ if(run.length){ const e=run[Math.floor(run.length/2)], [oc,or]=side.out(e[0],e[1]), p=cc((e[0]+oc)/2,(e[1]+or)/2);
+          M.syms.push({x:p[0],y:p[1],icon:(rndf()<0.18&&SPECIAL.length?pick(SPECIAL):(BY.dungeon['Door1x1']?'Door1x1':SPECIAL[0])),rot:side.rot}); doorMouth.add(e[0]+','+e[1]); } run=[]; };
+      for(const[c,r]of side.cells){ const[oc,or]=side.out(c,r); if(isFloor(c,r)&&isCorr(oc,or)) run.push([c,r]); else flush(); } flush(); } }
+  // farthest room for the down-stair
+  let farI=0,fd=-1; rooms.forEach((m,i)=>{const d=(cx(m)-cx(rooms[0]))**2+(cy(m)-cy(rooms[0]))**2; if(d>fd){fd=d;farI=i;}});
+  // orient a flight: long(up) end toward the room's nearest door
+  const stRot=m=>{ const rx=L.ox+cx(m)*L.cell, ry=L.oy+cy(m)*L.cell; let dx=0,dy=0,bd=1e18; for(const s of M.syms){ if(/^Door/.test(s.icon||'')){ const d=(s.x-rx)**2+(s.y-ry)**2; if(d<bd){bd=d;dx=s.x-rx;dy=s.y-ry;} } } if(bd>1e17)return 0; return Math.abs(dx)>=Math.abs(dy)?(dx<0?0:180):(dy<0?90:270); };
+  // symbol placement on conflict-free cells
+  const occupied=new Set();
+  const roomCells=m=>{ const o=[]; for(let r=m.y;r<m.y+m.h;r++)for(let c=m.x;c<m.x+m.w;c++) if(M.cells[c+','+r]==='floor') o.push([c,r]); return o; };
+  const doorDist=(m,c,r)=>{ let bd=99; for(const[dc,dr]of roomCells(m)) if(doorMouth.has(dc+','+dr)){const d=(dc-c)**2+(dr-r)**2; if(d<bd)bd=d;} return bd; };
+  const doorClear=(m,c,r)=>{ for(const[dc,dr]of roomCells(m)) if(doorMouth.has(dc+','+dr) && Math.max(Math.abs(dc-c),Math.abs(dr-r))<2) return false; return true; };   // keep a 1-cell halo (incl. diagonals) around every doorway clear
+  const freeCells=m=>roomCells(m).filter(([c,r])=> !occupied.has(c+','+r) && !doorMouth.has(c+','+r) && doorClear(m,c,r) );
+  const take=(c,r)=>{ occupied.add(c+','+r); return cc(c,r); };
+  // stairs: interior cell of start/far rooms, maximally far from doors
+  const placeStair=(m,rot)=>{ let fc=freeCells(m); if(!fc.length)fc=roomCells(m).filter(([c,r])=>!occupied.has(c+','+r)); if(!fc.length)return; let best=fc[0],bs=-1; for(const[c,r]of fc){const s=doorDist(m,c,r); if(s>bs){bs=s;best=[c,r];}} const p=take(best[0],best[1]); M.syms.push({x:p[0],y:p[1],icon:dnm('StairsFlight1x1','StairSpiralSquareDown1x1'),rot}); };
+  if(O.stairs!=='no'){ placeStair(rooms[0],stRot(rooms[0])); placeStair(rooms[farI],(stRot(rooms[farI])+180)%360); }
+  // key (number) per room: a free corner-ish cell, away from doors
   const feats=['Chest1x1','Altar1x1','Fountain1x1','Statue1x1','Cask1x1','Trap1x1','TableRound1x1','Bookcase1x1','CoffinClosed1x1','Loot1x1','Grave1x1'].filter(n=>BY.dungeon[n]);
-  rooms.forEach(m=>{ const kp=cc(m.x,m.y); M.syms.push({x:kp[0],y:kp[1],type:'key'}); if(m!==rooms[0]&&m!==far&&feats.length){ const fp=cc(Math.floor(cx(m)),Math.floor(cy(m))); M.syms.push({x:fp[0],y:fp[1],icon:pick(feats)}); } });
+  rooms.forEach((m,i)=>{ const cxx=cx(m)-0.5, cyy=cy(m)-0.5;
+    let fc=freeCells(m); if(!fc.length)fc=roomCells(m).filter(([c,r])=>!occupied.has(c+','+r));
+    if(fc.length){ let best=fc[0],bs=-1; for(const[c,r]of fc){const sc=(c-cxx)**2+(r-cyy)**2 + Math.min(9,doorDist(m,c,r))*0.3; if(sc>bs){bs=sc;best=[c,r];}} const p=take(best[0],best[1]); M.syms.push({x:p[0],y:p[1],type:'key'}); }
+    if(i!==0&&i!==farI&&feats.length){ const fc2=freeCells(m); if(fc2.length){ let best=fc2[0],bd=1e9; for(const[c,r]of fc2){const d=(c-cxx)**2+(r-cyy)**2; if(d<bd){bd=d;best=[c,r];}} const p=take(best[0],best[1]); M.syms.push({x:p[0],y:p[1],icon:pick(feats)}); } } });
+  // dead-end passages: maze fills with many; 'keep'/'some' add a few; 'trim all' adds none. Drawn after doorways so stubs never spawn doors/symbol conflicts.
+  { const cnt = O.corridors==='maze'?Math.round(nroom*1.6) : O.deadends==='keep'?Math.round(nroom*1.1) : O.deadends==='some'?Math.round(nroom*0.45) : 0;
+    const corr=[]; for(const k in M.cells){ const[c,r]=k.split(',').map(Number); if(M.cells[k]==='floor'&&roomAt(c,r)===-1) corr.push([c,r]); }
+    for(let i=0;i<cnt&&corr.length;i++){ let[c,r]=pick(corr), d=pick(DIRS), len=2+rnd(4);
+      for(let s=0;s<len;s++){ const nc=c+d[0],nr=r+d[1]; if(nc<1||nr<1||nc>=cols-1||nr>=rows-1||roomAt(nc,nr)!==-1||M.cells[nc+','+nr]==='floor')break; M.cells[nc+','+nr]='floor'; c=nc;r=nr; if(rndf()<0.35)d=pick(DIRS); } } }
   render(); maybeFit(); save();
 }
-function carveCorr(x0,y0,x1,y1){ let x=x0,y=y0; while(x!==x1){M.cells[x+','+y]='floor';x+=x1>x?1:-1;} while(y!==y1){M.cells[x+','+y]='floor';y+=y1>y?1:-1;} M.cells[x+','+y]='floor'; }
-function placeDoors(rooms,cc){
-  // group consecutive wall openings into runs -> ONE door per run, rotated to the wall
-  const scan=(list,rot)=>{ let run=[]; const flush=()=>{ if(run.length){ const e=run[Math.floor(run.length/2)]; const p=cc((e.ic+e.oc)/2,(e.ir+e.or)/2); if(BY.dungeon['Door1x1']) M.syms.push({x:p[0],y:p[1],icon:'Door1x1',rot}); } run=[]; };
-    for(const e of list){ if(M.cells[e.ic+','+e.ir]==='floor'&&M.cells[e.oc+','+e.or]==='floor') run.push(e); else flush(); } flush(); };
-  for(const m of rooms){ const top=[],bot=[],lft=[],rgt=[];
-    for(let c=m.x;c<m.x+m.w;c++){ top.push({ic:c,ir:m.y,oc:c,or:m.y-1}); bot.push({ic:c,ir:m.y+m.h-1,oc:c,or:m.y+m.h}); }
-    for(let r=m.y;r<m.y+m.h;r++){ lft.push({ic:m.x,ir:r,oc:m.x-1,or:r}); rgt.push({ic:m.x+m.w-1,ir:r,oc:m.x+m.w,or:r}); }
-    scan(top,0); scan(bot,0); scan(lft,90); scan(rgt,90); } }
-document.getElementById('gen').onclick=()=>{ if(!confirm('Generate a random '+(M.mode==='wild'?'wilderness':'dungeon')+'? This replaces the current map.'))return; (M.mode==='wild'?genWild:genDun)(); };
+function doGenerate(){ if(!confirm('Generate a random '+(M.mode==='wild'?'wilderness':'dungeon')+'? This replaces the current map.'))return; (M.mode==='wild'?genWild:genDun)(); }
 
 // ---------- boot ----------
 // (dev demo fixtures removed for production — use ?gw / ?gd to generate sample maps, ?dev to expose window.MM)

@@ -33,11 +33,28 @@
   footer{ background:var(--bar); padding:6px 12px; font-size:12px; color:#bbb; border-top:2px solid #000; }
   label.num{ font-size:12px; color:#ccc; } input[type=number]{ width:44px; background:#111; color:#eee; border:1px solid #555; border-radius:4px; padding:3px; }
   kbd{ background:#111; border:1px solid #555; border-radius:3px; padding:1px 5px; font-size:11px; }
+  #menuToggle,#helpToggle{ display:none; }
+  .backdrop{ display:none; }
+  /* narrow screens (phones / small tablets): sidebar becomes an off-canvas drawer, toolbar scrolls, help collapses */
+  @media (max-width:820px){
+    header{ flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; padding:6px 8px; gap:6px; }
+    header h1{ display:none; }
+    header>*{ flex:0 0 auto; }
+    #menuToggle,#helpToggle{ display:inline-block; font-size:16px; line-height:1; padding:6px 10px; }
+    aside{ position:fixed; top:0; bottom:0; left:0; z-index:60; width:82vw; max-width:320px;
+      transform:translateX(-100%); transition:transform .22s ease; box-shadow:2px 0 18px rgba(0,0,0,.6); }
+    body.nav-open aside{ transform:translateX(0); }
+    .backdrop{ position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.5); }
+    body.nav-open .backdrop{ display:block; }
+    footer{ display:none; }
+    body.help-open footer{ display:block; position:fixed; left:0; right:0; bottom:0; z-index:70; max-height:55vh; overflow:auto; }
+  }
 </style>
 </head>
 <body>
 <div id="banner" role="alert" aria-live="assertive" style="display:none;position:fixed;top:0;left:0;right:0;z-index:999;background:#7a1f1f;color:#fff;padding:8px 36px 8px 14px;font-size:13px;line-height:1.4;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.5);"><span id="bannermsg"></span><button id="bannerx" title="Dismiss" style="position:absolute;right:6px;top:5px;background:transparent;border:0;color:#fff;font-size:16px;cursor:pointer;padding:2px 6px;">&times;</button></div>
 <header>
+  <button id="menuToggle" title="Tools" aria-label="Toggle tools">&#9776;</button>
   <h1>OSR MAP MAKER</h1>
   <button id="tabWild" class="on">Wilderness</button><button id="tabDun">Dungeon</button>
   <input type="text" id="title" value="THE HUSH" size="20" title="Map title">
@@ -50,9 +67,11 @@
   <button id="view" title="Toggle GM / Player view">GM view</button>
   <button id="zoomout" title="Zoom out (−)">&minus;</button><button id="zoomlbl" title="Reset zoom to 100%">100%</button><button id="zoomin" title="Zoom in (+)">+</button><button id="zoomfit" title="Fit map to window">Fit</button>
   <button id="export" style="background:var(--hl);color:#111;font-weight:700;">Export PNG</button>
+  <button id="helpToggle" title="Help" aria-label="Toggle help">?</button>
 </header>
 <main>
   <aside id="tools"></aside>
+  <div class="backdrop" id="backdrop"></div>
   <div class="canvaswrap"><div class="canvaspad"><canvas id="cv" width="1000" height="1320"></canvas></div></div>
 </main>
 <footer id="help"><b>Select/Move</b> drags symbols, names <i>and</i> rivers/roads/trails/borders (selected = gold); <kbd>R</kbd><kbd>H</kbd><kbd>V</kbd><kbd>I</kbd> transform, <kbd>Del</kbd> removes. Drag the map itself to pan. <b>Draw River/Road/Trail/Border</b> are freehand (drag); <b>Border edge</b> snaps to hex edges. <b>Snap to grid</b> aligns dungeon symbols. ¼-inch squares, export = 300 dpi. <kbd>Esc</kbd> cancels a stroke, <kbd>Ctrl+Z</kbd> undo. <b>Pan</b> hold <kbd>Space</kbd> or drag empty space with <b>Select/Move</b> (middle-drag too). <b>Zoom</b> <kbd>+</kbd><kbd>−</kbd> or Ctrl+wheel (pinch on touch), <kbd>0</kbd> resets, <b>Fit</b> sizes to window. On touch, drag = draw, two fingers = pan &amp; zoom.</footer>
@@ -527,6 +546,10 @@ document.getElementById('export').onclick=()=>{ readTitle();
       const url=URL.createObjectURL(b),a=document.createElement('a'); a.href=url; a.download=fname; a.click();
       setTimeout(()=>{ URL.revokeObjectURL(url); free(); },1000); },'image/png'); }
   catch(err){ free(); showBanner('Export failed: '+(err&&err.message||err)); } };
+// mobile chrome: ☰ opens the tools drawer, backdrop / ? toggle it and the help footer
+document.getElementById('menuToggle').onclick=()=>document.body.classList.toggle('nav-open');
+document.getElementById('backdrop').onclick=()=>document.body.classList.remove('nav-open');
+document.getElementById('helpToggle').onclick=()=>document.body.classList.toggle('help-open');
 document.getElementById('zoomin').onclick=()=>zoomAt(1.25);
 document.getElementById('zoomout').onclick=()=>zoomAt(1/1.25);
 document.getElementById('zoomlbl').onclick=zoomReset;

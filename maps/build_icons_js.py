@@ -5,7 +5,11 @@ import os, re, glob, json, base64
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
+LABEL_OVERRIDES = {'StairsFlight1x1': 'Stairs', 'TableRound1x1': 'Table'}
+
 def label(n):
+    if n in LABEL_OVERRIDES:
+        return LABEL_OVERRIDES[n]
     n = re.sub(r'\d+x\d+', '', n); n = re.sub(r'_\d+', '', n); n = n.replace('Big', '')
     n = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', n)
     n = re.sub(r'(?<=[A-Za-z])(?=\d)', ' ', n)

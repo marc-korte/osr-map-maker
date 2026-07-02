@@ -62,7 +62,7 @@
   <label class="num">cols <input type="number" id="cols" value="9" min="3" max="120"></label>
   <label class="num">rows <input type="number" id="rows" value="12" min="3" max="120"></label>
   <label class="num" id="scaleLbl">miles/hex <input type="number" id="scale" value="1" min="0.1" step="0.5" title="Map scale: miles per hex (wilderness) / feet per square (dungeon)"></label>
-  <button id="undo" title="Ctrl+Z">Undo</button><button id="clear">Clear</button>
+  <button id="undo" title="Ctrl+Z">Undo</button><button id="redo" title="Ctrl+Y">Redo</button><button id="clear">Clear</button>
   <button id="save">Save .json</button><button id="load">Load</button><input type="file" id="file" accept=".json" style="display:none">
   <button id="view" title="Toggle GM / Player view">GM view</button>
   <button id="zoomout" title="Zoom out (−)">&minus;</button><button id="zoomlbl" title="Reset zoom to 100%">100%</button><button id="zoomin" title="Zoom in (+)">+</button><button id="zoomfit" title="Fit map to window">Fit</button>
@@ -74,7 +74,7 @@
   <div class="backdrop" id="backdrop"></div>
   <div class="canvaswrap"><div class="canvaspad"><canvas id="cv" width="1000" height="1320"></canvas></div></div>
 </main>
-<footer id="help"><b>Select/Move</b> drags symbols, names <i>and</i> rivers/roads/trails/borders (selected = gold); <kbd>R</kbd><kbd>H</kbd><kbd>V</kbd><kbd>I</kbd> transform, <kbd>Del</kbd> removes. Drag the map itself to pan. <b>Draw River/Road/Trail/Border</b> are freehand (drag); <b>Border edge</b> snaps to hex edges. <b>Snap to grid</b> aligns dungeon symbols. ¼-inch squares, export = 300 dpi. <kbd>Esc</kbd> cancels a stroke, <kbd>Ctrl+Z</kbd> undo. <b>Pan</b> hold <kbd>Space</kbd> or drag empty space with <b>Select/Move</b> (middle-drag too). <b>Zoom</b> <kbd>+</kbd><kbd>−</kbd> or Ctrl+wheel (pinch on touch), <kbd>0</kbd> resets, <b>Fit</b> sizes to window. On touch, drag = draw, two fingers = pan &amp; zoom.</footer>
+<footer id="help"><b>Select/Move</b> drags symbols, names <i>and</i> rivers/roads/trails/borders (selected = gold); <kbd>R</kbd><kbd>H</kbd><kbd>V</kbd><kbd>I</kbd> transform, <kbd>Del</kbd> removes. Drag the map itself to pan. <b>Draw River/Road/Trail/Border</b> are freehand (drag); <b>Border edge</b> snaps to hex edges. <b>Snap to grid</b> aligns dungeon symbols. ¼-inch squares, export = 300 dpi. <kbd>Esc</kbd> cancels a stroke &amp; deselects, <kbd>Ctrl+Z</kbd> undo, <kbd>Ctrl+Y</kbd> redo, <kbd>Ctrl+S</kbd> save .json. <b>Pan</b> hold <kbd>Space</kbd> or drag empty space with <b>Select/Move</b> (middle-drag too). <b>Zoom</b> <kbd>+</kbd><kbd>−</kbd> or Ctrl+wheel (pinch on touch), <kbd>0</kbd> resets, <b>Fit</b> sizes to window. On touch, drag = draw, two fingers = pan &amp; zoom.</footer>
 
 <script src="icons.js"></script>
 <script>
@@ -139,9 +139,11 @@ let selLabel=-1, selSite=-1;
 function tT(){ if(M.mode==='dun'){ return (sel>=0&&M.syms[sel]&&M.syms[sel].icon)?M.syms[sel]:stampT; }
   if(selHex&&M.hex[selHex]){ let h=M.hex[selHex]; if(typeof h==='string'){h={n:h,rot:0,fx:false,fy:false,inv:false};M.hex[selHex]=h;} return h; } return stampT; }
 function eraseNearestStroke(px,py){ const a=curDraws(); let bi=-1,bd=400; a.forEach((d,i)=>{for(const p of d.pts){const dd=(p[0]-px)**2+(p[1]-py)**2; if(dd<bd){bd=dd;bi=i;}}}); if(bi>=0)a.splice(bi,1); }
-const undoStack=[];
-function snap(){ undoStack.push(JSON.stringify({hex:M.hex,sites:M.sites,roads:M.roads,cells:M.cells,syms:M.syms,labels:M.labels,drawsW:M.drawsW,drawsD:M.drawsD})); if(undoStack.length>50)undoStack.shift(); }
-function undo(){ const s=undoStack.pop(); if(!s)return; Object.assign(M,JSON.parse(s)); render(); save(); }
+const undoStack=[], redoStack=[];
+function stateStr(){ return JSON.stringify({hex:M.hex,sites:M.sites,roads:M.roads,cells:M.cells,syms:M.syms,labels:M.labels,drawsW:M.drawsW,drawsD:M.drawsD}); }
+function snap(){ undoStack.push(stateStr()); if(undoStack.length>50)undoStack.shift(); redoStack.length=0; }   // any new action invalidates redo
+function undo(){ const s=undoStack.pop(); if(!s)return; redoStack.push(stateStr()); if(redoStack.length>50)redoStack.shift(); Object.assign(M,JSON.parse(s)); render(); save(); }
+function redo(){ const s=redoStack.pop(); if(!s)return; undoStack.push(stateStr()); Object.assign(M,JSON.parse(s)); render(); save(); }   // direct push, not snap() → keeps redo history intact
 
 // ---------- geometry ----------
 function layout(){
@@ -514,7 +516,10 @@ function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2){ pinching=false; p
 cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse'){hoverX=hoverY=null;render();} });
-window.addEventListener('keydown',e=>{ if(e.key==='Escape'){commitRoad();curStroke=null;render();} if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();undo();return;}
+window.addEventListener('keydown',e=>{ if(e.key==='Escape'){commitRoad();curStroke=null;sel=-1;selHex=null;selDraw=-1;selLabel=-1;selSite=-1;dragging=null;buildTools();render();}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault(); if(e.shiftKey)redo(); else undo(); return;}   // toLowerCase: Shift makes e.key 'Z'
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo();return;}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();document.getElementById('save').onclick();return;}   // Ctrl+S = download .json, not the browser save-page dialog
   const typing=document.activeElement&&document.activeElement.tagName==='INPUT'; if(typing)return;
   if(e.key===' '||e.code==='Space'){ if(!spaceHeld){spaceHeld=true;setCursor();} e.preventDefault(); return; }   // hold Space = pan (hand)
   const k=e.key.toLowerCase();
@@ -576,6 +581,7 @@ document.getElementById('scale').addEventListener('input',e=>{ const v=Math.max(
 document.getElementById('tabWild').onclick=()=>setMode('wild');
 document.getElementById('tabDun').onclick=()=>setMode('dun');
 document.getElementById('undo').onclick=undo;
+document.getElementById('redo').onclick=redo;
 document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; snap(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.curRoad=null;M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); };
 function applyResize(){ const c=Math.max(3,Math.min(120,Math.round(+document.getElementById('cols').value||3))), r=Math.max(3,Math.min(120,Math.round(+document.getElementById('rows').value||3))); document.getElementById('cols').value=c; document.getElementById('rows').value=r; M.cols=c; M.rows=r; if(M.mode==='wild'){M.colsW=c;M.rowsW=r;}else{M.colsD=c;M.rowsD=r;} render(); maybeFit(); save(); }
 document.getElementById('cols').addEventListener('change',applyResize);   // auto-resize on commit (Enter/blur) — no Resize button

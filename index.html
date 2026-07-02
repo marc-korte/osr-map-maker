@@ -54,7 +54,7 @@
 <body>
 <div id="banner" role="alert" aria-live="assertive" style="display:none;position:fixed;top:0;left:0;right:0;z-index:999;background:#7a1f1f;color:#fff;padding:8px 36px 8px 14px;font-size:13px;line-height:1.4;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.5);"><span id="bannermsg"></span><button id="bannerx" title="Dismiss" style="position:absolute;right:6px;top:5px;background:transparent;border:0;color:#fff;font-size:16px;cursor:pointer;padding:2px 6px;">&times;</button></div>
 <header>
-  <button id="menuToggle" title="Tools" aria-label="Toggle tools">&#9776;</button>
+  <button id="menuToggle" title="Tools" aria-label="Toggle tools" aria-controls="tools" aria-expanded="false">&#9776;</button>
   <h1>OSR MAP MAKER</h1>
   <button id="tabWild" class="on">Wilderness</button><button id="tabDun">Dungeon</button>
   <input type="text" id="title" value="THE HUSH" size="20" title="Map title">
@@ -67,7 +67,7 @@
   <button id="view" title="Toggle GM / Player view">GM view</button>
   <button id="zoomout" title="Zoom out (−)">&minus;</button><button id="zoomlbl" title="Reset zoom to 100%">100%</button><button id="zoomin" title="Zoom in (+)">+</button><button id="zoomfit" title="Fit map to window">Fit</button>
   <button id="export" style="background:var(--hl);color:#111;font-weight:700;">Export PNG</button>
-  <button id="helpToggle" title="Help" aria-label="Toggle help">?</button>
+  <button id="helpToggle" title="Help" aria-label="Toggle help" aria-controls="help" aria-expanded="false">?</button>
 </header>
 <main>
   <aside id="tools"></aside>
@@ -117,10 +117,12 @@ function computeBBox(im){ const w=im.naturalWidth,h=im.naturalHeight; if(!w||!h)
   }catch(e){ return null; } }
 
 // ---------- model ----------
-const M={ mode:'wild', title:'THE HUSH', titleW:'THE HUSH', titleD:'THE DUNGEON',
+const SCHEMA_V=2;   // save-file schema version; absent v = v1 (everything shipped before versioning, incl. legacy 'tsrmap2' saves)
+const M={ v:SCHEMA_V, mode:'wild', title:'THE HUSH', titleW:'THE HUSH', titleD:'THE DUNGEON',
   cols:9, rows:12, colsW:9, rowsW:12, colsD:28, rowsD:36, view:'gm',
   layers:[{id:'terrain',label:'Terrain',vis:true,gm:false},{id:'lines',label:'Lines',vis:true,gm:false},{id:'symbols',label:'Symbols',vis:true,gm:false},{id:'keys',label:'Keys',vis:true,gm:false},{id:'text',label:'Text',vis:true,gm:false}],
   hex:{}, sites:[], roads:[], cells:{}, syms:[], labels:[], drawsW:[], drawsD:[], curRoad:null, curStyle:'road', gridBg:true, snap:true, milesPerHex:1, feetPerSquare:10 };
+const M0=JSON.stringify(M);   // pristine defaults — loads fill/reset missing fields from this
 let tool='terrain', curIcon='Forest', filter='';
 let stampT={rot:0,fx:false,fy:false,inv:false};   // transform for new/selected stamps
 let sel=-1;                                        // index of selected dungeon symbol
@@ -157,11 +159,14 @@ function poly(g,pts,fill,stroke,w){ g.beginPath(); pts.forEach((p,i)=>i?g.lineTo
 function disc(g,x,y,r,fill,stroke,w){ g.beginPath(); g.arc(x,y,r,0,7); if(fill){g.fillStyle=fill;g.fill();} if(stroke){g.strokeStyle=stroke;g.lineWidth=w||1;g.stroke();} }
 function txt(g,x,y,t,px,bold,col,al){ g.fillStyle=col||INK; g.font=(bold?'bold ':bold===false?'italic ':'')+px+'px '+(bold===false?'Georgia,serif':'Arial,Helvetica,sans-serif'); g.textAlign=al||'center'; g.textBaseline='middle'; g.fillText(t,x,y); }
 const HEX_FILL=0.62;   // hex icons: standardize so trimmed content fills this fraction of the cell box
-function drawIcon(g,set,name,cx,cy,bw,bh){ const im=IMG[set][name]; if(!im||!im.complete||!im.naturalWidth)return; const NW=im.naturalWidth,NH=im.naturalHeight; const bb=(set==='hex')&&BBOX[set]&&BBOX[set][name];
+// placeholder for icons that failed to load or aren't in the bundle: paper box + first letter of the label
+function drawIconFallback(g,set,name,cx,cy,bw,bh){ const it=BY[set]&&BY[set][name], ch=(((it&&it.label)||name||'?').charAt(0)||'?').toUpperCase();
+  const w=bw*0.7,h=bh*0.7; g.save(); g.fillStyle=PAP; g.fillRect(cx-w/2,cy-h/2,w,h); g.strokeStyle=INK; g.lineWidth=1.4; g.strokeRect(cx-w/2,cy-h/2,w,h); txt(g,cx,cy,ch,Math.round(h*0.6),true,INK); g.restore(); }
+function drawIcon(g,set,name,cx,cy,bw,bh){ const im=IMG[set][name]; if(!im||im.__failed){ drawIconFallback(g,set,name,cx,cy,bw,bh); return; } if(!im.complete||!im.naturalWidth)return; const NW=im.naturalWidth,NH=im.naturalHeight; const bb=(set==='hex')&&BBOX[set]&&BBOX[set][name];
   let sc,dx,dy; if(bb){ sc=Math.min(bw*HEX_FILL/bb.w,bh*HEX_FILL/bb.h); dx=cx-(bb.x+bb.w/2)*sc; dy=cy-(bb.y+bb.h/2)*sc; } else { sc=Math.min(bw/NW,bh/NH); dx=cx-NW*sc/2; dy=cy-NH*sc/2; }
   g.drawImage(im,dx,dy,NW*sc,NH*sc); }
 function tiles(name){ const m=/(\d)x(\d)/.exec(name); return m?[+m[1],+m[2]]:[1,1]; }
-function drawIconT(g,set,name,cx,cy,bw,bh,t){ const im=IMG[set][name]; if(!im||!im.complete||!im.naturalWidth)return; const NW=im.naturalWidth,NH=im.naturalHeight; const bb=(set==='hex')&&BBOX[set]&&BBOX[set][name];
+function drawIconT(g,set,name,cx,cy,bw,bh,t){ const im=IMG[set][name]; if(!im||im.__failed){ drawIconFallback(g,set,name,cx,cy,bw,bh); return; } if(!im.complete||!im.naturalWidth)return; const NW=im.naturalWidth,NH=im.naturalHeight; const bb=(set==='hex')&&BBOX[set]&&BBOX[set][name];
   let sc,dx,dy; if(bb){ sc=Math.min(bw*HEX_FILL/bb.w,bh*HEX_FILL/bb.h); dx=-(bb.x+bb.w/2)*sc; dy=-(bb.y+bb.h/2)*sc; } else { sc=Math.min(bw/NW,bh/NH); dx=-NW*sc/2; dy=-NH*sc/2; }
   const w=NW*sc,h=NH*sc;
   g.save(); g.translate(cx,cy); if(t&&t.rot)g.rotate(t.rot*Math.PI/180); if(t&&(t.fx||t.fy))g.scale(t.fx?-1:1,t.fy?-1:1);
@@ -523,21 +528,65 @@ function readTitle(){ const v=document.getElementById('title').value; M.title=v;
 function showBanner(msg){ const b=document.getElementById('banner'),m=document.getElementById('bannermsg'); if(!b||!m)return; m.textContent=msg; b.style.display='block'; }
 { const bx=document.getElementById('bannerx'); if(bx)bx.onclick=()=>{document.getElementById('banner').style.display='none';}; }
 let saveWarned=false;
+const isQuota=e=>!!e&&(e.name==='QuotaExceededError'||e.code===22);
 function save(){ readTitle(); try{ localStorage.setItem('osrmap',JSON.stringify(M)); saveWarned=false; }
-  catch(e){ if(!saveWarned){ saveWarned=true; showBanner('Autosave failed — browser storage is full or disabled. Your edits won’t persist on reload. Use “Save .json” to keep your work.'); } } }
-function loadLS(){ try{const s=localStorage.getItem('osrmap')||localStorage.getItem('tsrmap2'); if(s)Object.assign(M,JSON.parse(s));}catch(e){} }
+  catch(e){ if(!saveWarned){ saveWarned=true; showBanner(isQuota(e)
+    ?'Browser storage is full — autosave is failing. Export with “Save .json” now, and delete unused saved maps to free space.'
+    :'Autosave failed — browser storage is full or disabled. Your edits won’t persist on reload. Use “Save .json” to keep your work.'); } } }
+// ---- load validation / migration: every load path (autosave, .json import, slots) goes through these ----
+function validateMap(o){ if(!o||typeof o!=='object'||Array.isArray(o)) return 'not a map save (expected a JSON object)';
+  if(!('hex'in o||'cells'in o||'syms'in o||'drawsW'in o||'sites'in o)) return 'doesn’t look like an OSR Map Maker save';
+  for(const k of ['hex','cells']) if(o[k]!=null&&(typeof o[k]!=='object'||Array.isArray(o[k]))) return 'field “'+k+'” is not an object';
+  for(const k of ['syms','sites','labels','drawsW','drawsD','roads','layers']) if(o[k]!=null&&!Array.isArray(o[k])) return 'field “'+k+'” is not a list';
+  return null; }
+function migrateMap(o){ o.v=SCHEMA_V; const D=JSON.parse(M0); let dropped=0;   // fill v1 gaps from defaults, clamp sizes, drop malformed items
+  for(const k in D) if(o[k]===undefined||o[k]===null) o[k]=D[k];
+  const clamp=v=>Math.max(3,Math.min(120,Math.round(+v||3)));
+  for(const k of ['cols','rows','colsW','rowsW','colsD','rowsD']) o[k]=clamp(o[k]);
+  const num=x=>typeof x==='number'&&Number.isFinite(x), filt=(a,f)=>{ const b=a.filter(f); dropped+=a.length-b.length; return b; };
+  o.drawsW=filt(o.drawsW,d=>d&&Array.isArray(d.pts)&&d.pts.length>0); o.drawsD=filt(o.drawsD,d=>d&&Array.isArray(d.pts)&&d.pts.length>0);
+  o.syms=filt(o.syms,s=>s&&num(s.x)&&num(s.y)); o.labels=filt(o.labels,l=>l&&num(l.x)&&num(l.y)); o.sites=filt(o.sites,s=>s&&num(s.c)&&num(s.r));
+  return dropped; }
+const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rowsW','colsD','rowsD','view','layers','hex','sites','roads','cells','syms','labels','drawsW','drawsD','curRoad','curStyle','gridBg','snap','milesPerHex','feetPerSquare','dunOpts'];
+function applyMap(o){ const D=JSON.parse(M0); for(const k of MAP_KEYS) M[k]=(o[k]!==undefined)?o[k]:D[k]; }   // whitelist: keys absent in the save reset to defaults (no leftovers from the previous map)
+function loadMapObj(o){ if(o.v>SCHEMA_V) showBanner('This map was saved by a newer version of OSR Map Maker — loading anyway.');
+  const dropped=migrateMap(o); applyMap(o);
+  if(dropped) showBanner(dropped+' damaged item'+(dropped>1?'s were':' was')+' removed while loading this map.'); }
+function afterLoad(){ document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows; setMode(M.mode||'wild'); }
+function parseMap(s){ try{ const o=JSON.parse(s); return validateMap(o)?null:o; }catch(e){ return null; } }
+function loadLS(){
+  let raw=null;
+  try{ raw=localStorage.getItem('osrmap')||localStorage.getItem('tsrmap2'); }
+  catch(e){ showBanner('Browser storage is unavailable — your map won’t persist on reload. Use “Save .json” to keep your work.'); return; }
+  if(raw==null) return;
+  let o=parseMap(raw);
+  if(!o){ // corrupted autosave: quarantine it, fall back to the last good backup
+    try{ localStorage.setItem('osrmap.corrupt',raw); }catch(e){}
+    let bak=null; try{ bak=localStorage.getItem('osrmap.bak'); }catch(e){}
+    o=bak?parseMap(bak):null;
+    showBanner(o?'Your autosave was corrupted — restored the last good backup. The damaged copy was kept in browser storage as “osrmap.corrupt”.'
+                :'Your autosave was corrupted and no backup was available — starting with a fresh map. Use “Save .json” regularly to keep copies.');
+    if(!o) return;
+  }
+  loadMapObj(o);
+  try{ localStorage.setItem('osrmap.bak',JSON.stringify(M)); }catch(e){}   // last-good backup, refreshed once per successful boot
+}
 document.getElementById('title').addEventListener('input',()=>{readTitle();render();});
 document.getElementById('scale').addEventListener('input',e=>{ const v=Math.max(0.01,+e.target.value||0); if(M.mode==='wild')M.milesPerHex=v; else M.feetPerSquare=v; render(); save(); });
 document.getElementById('tabWild').onclick=()=>setMode('wild');
 document.getElementById('tabDun').onclick=()=>setMode('dun');
 document.getElementById('undo').onclick=undo;
 document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; snap(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.curRoad=null;M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); };
-function applyResize(){ const c=Math.max(3,Math.min(120,+document.getElementById('cols').value||3)), r=Math.max(3,Math.min(120,+document.getElementById('rows').value||3)); document.getElementById('cols').value=c; document.getElementById('rows').value=r; M.cols=c; M.rows=r; if(M.mode==='wild'){M.colsW=c;M.rowsW=r;}else{M.colsD=c;M.rowsD=r;} render(); maybeFit(); save(); }
+function applyResize(){ const c=Math.max(3,Math.min(120,Math.round(+document.getElementById('cols').value||3))), r=Math.max(3,Math.min(120,Math.round(+document.getElementById('rows').value||3))); document.getElementById('cols').value=c; document.getElementById('rows').value=r; M.cols=c; M.rows=r; if(M.mode==='wild'){M.colsW=c;M.rowsW=r;}else{M.colsD=c;M.rowsD=r;} render(); maybeFit(); save(); }
 document.getElementById('cols').addEventListener('change',applyResize);   // auto-resize on commit (Enter/blur) — no Resize button
 document.getElementById('rows').addEventListener('change',applyResize);
 document.getElementById('save').onclick=()=>{ readTitle(); const b=new Blob([JSON.stringify(M)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=(M.title||'map').replace(/\W+/g,'_')+'.json'; a.click(); };
 document.getElementById('load').onclick=()=>document.getElementById('file').click();
-document.getElementById('file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{Object.assign(M,JSON.parse(rd.result)); document.getElementById('cols').value=M.cols;document.getElementById('rows').value=M.rows; setMode(M.mode||'wild');}catch(err){alert('Bad file');} }; rd.readAsText(f); };
+document.getElementById('file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
+  rd.onload=()=>{ let o; try{ o=JSON.parse(rd.result); }catch(err){ showBanner('Couldn’t load “'+f.name+'”: not valid JSON ('+(err&&err.message||err)+').'); return; }
+    const err=validateMap(o); if(err){ showBanner('Couldn’t load “'+f.name+'”: '+err+'.'); return; }
+    snap(); loadMapObj(o); afterLoad(); };   // snap first → an accidental Load is undoable
+  rd.readAsText(f); e.target.value=''; };
 const MAX_EXPORT_PX=16e6;   // Safari/iOS cap is ~16.7MP; stay under or the canvas exports blank
 document.getElementById('export').onclick=()=>{ readTitle();
   let ss=SS; while(ss>1 && LW*ss*LH*ss>MAX_EXPORT_PX) ss--;   // drop supersample to fit
@@ -552,9 +601,9 @@ document.getElementById('export').onclick=()=>{ readTitle();
       setTimeout(()=>{ URL.revokeObjectURL(url); free(); },1000); },'image/png'); }
   catch(err){ free(); showBanner('Export failed: '+(err&&err.message||err)); } };
 // mobile chrome: ☰ opens the tools drawer, backdrop / ? toggle it and the help footer
-document.getElementById('menuToggle').onclick=()=>document.body.classList.toggle('nav-open');
-document.getElementById('backdrop').onclick=()=>document.body.classList.remove('nav-open');
-document.getElementById('helpToggle').onclick=()=>document.body.classList.toggle('help-open');
+document.getElementById('menuToggle').onclick=()=>{ const o=document.body.classList.toggle('nav-open'); document.getElementById('menuToggle').setAttribute('aria-expanded',o); };
+document.getElementById('backdrop').onclick=()=>{ document.body.classList.remove('nav-open'); document.getElementById('menuToggle').setAttribute('aria-expanded','false'); };
+document.getElementById('helpToggle').onclick=()=>{ const o=document.body.classList.toggle('help-open'); document.getElementById('helpToggle').setAttribute('aria-expanded',o); };
 document.getElementById('zoomin').onclick=()=>zoomAt(1.25);
 document.getElementById('zoomout').onclick=()=>zoomAt(1/1.25);
 document.getElementById('zoomlbl').onclick=zoomReset;
@@ -730,7 +779,9 @@ function genDun(){
   const RZ={small:[2,3],medium:[2,5],large:[3,6]}[O.roomSize]||[2,5];
   const rooms=[], nroom=Math.max(4,Math.min(140,Math.round(cols*rows/CPR)));
   let t=0;
-  while(rooms.length<nroom && t++<nroom*45){ const big=O.roomSize==='large'&&rndf()<0.3; const w=RZ[0]+rnd(RZ[1]+(big?2:0)),h=RZ[0]+rnd(RZ[1]+(big?2:0)),x=1+rnd(Math.max(1,cols-w-2)),y=1+rnd(Math.max(1,rows-h-2));
+  while(rooms.length<nroom && t++<nroom*45){ const big=O.roomSize==='large'&&rndf()<0.3; const w=RZ[0]+rnd(RZ[1]+(big?2:0)),h=RZ[0]+rnd(RZ[1]+(big?2:0));
+    if(w>cols-2||h>rows-2)continue;   // room can't fit inside the 1-cell border → reject before placing
+    const x=1+rnd(cols-w-2),y=1+rnd(rows-h-2);
     if(rooms.some(o=>!(x+w+1<o.x||o.x+o.w+1<x||y+h+1<o.y||o.y+o.h+1<y)))continue;
     if(roomHitsRes(x,y,w,h))continue;   // don't spawn rooms under the key/ruler
     rooms.push({x,y,w,h}); for(let r=y;r<y+h;r++)for(let c=x;c<x+w;c++)M.cells[c+','+r]='floor'; }
@@ -809,10 +860,11 @@ function boot(){
   if(location.search.includes('gw')){setMode('wild');genWild();} else if(location.search.includes('gd')){setMode('dun');genDun();}
   if(location.search.includes('dev'))window.MM=M;
 }
-let pending=0,started=false;
+let pending=0,started=false,failedIcons=0;
+const iconDone=()=>{ pending--; if(pending===0&&started){ render(); if(failedIcons)showBanner(failedIcons+' map icon'+(failedIcons>1?'s':'')+' failed to load — showing placeholders. Your map data is intact.'); } };
 for(const set of ['hex','dungeon']) for(const it of ICONS[set]){ const im=new Image(); pending++;
-  im.onload=()=>{ BBOX[set][it.n]=computeBBox(im); pending--; if(pending===0&&started)render(); };
-  im.onerror=()=>{ console.warn('OSR Map Maker: icon failed to load —',set,it.n); pending--; if(pending===0&&started)render(); };
+  im.onload=()=>{ BBOX[set][it.n]=computeBBox(im); iconDone(); };
+  im.onerror=()=>{ console.warn('OSR Map Maker: icon failed to load —',set,it.n); im.__failed=true; failedIcons++; iconDone(); };
   im.src=it.uri; IMG[set][it.n]=im; }
 started=true; boot(); if(pending===0)render();
 </script>

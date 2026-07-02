@@ -11,9 +11,10 @@ browser.
 
 **▶ Live: https://marc-korte.github.io/osr-map-maker/**
 
-Each person who opens the link gets their own private workspace; maps are saved
-in that browser (localStorage) and via **Save .json** / **Load**. Nothing is
-stored server-side.
+Each person who opens the link gets their own private workspace; the working
+map autosaves in that browser (localStorage), named snapshots live under
+**Saved maps** in the sidebar, and **Save .json** / **Load** move maps between
+browsers. Nothing is stored server-side. Undo/redo: Ctrl+Z / Ctrl+Y.
 
 ## Layout
 
@@ -29,6 +30,10 @@ maps/             # Python icon/map generators (dev tooling, not part of the sit
 
 It's a static file — just open `index.html` in a browser. No build step, no
 server needed.
+
+Dev URL hooks: `?gw` / `?gd` generate a sample wilderness/dungeon, `?dev`
+exposes the model as `window.MM`, and `?test` runs the in-page invariant
+checks (result appears in the tab title; your autosave is restored after).
 
 Editing the icon set (optional):
 

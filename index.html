@@ -423,6 +423,7 @@ function buildTools(){
     const tip=document.createElement('div'); tip.style.cssText='font-size:11px;color:#999;margin-top:4px'; tip.textContent=(editing?'Editing selection. ':'Sets next stamp. ')+'Keys: R H V I'; a.appendChild(tip);
   }
   layersPanel(a);
+  mapsPanel(a);
   const set=M.mode==='wild'?'hex':'dungeon';
   const h2=document.createElement('h3'); h2.textContent=(set==='hex'?'Terrain icons':'Dungeon symbols')+' (click)'; a.appendChild(h2);
   if(set==='dungeon'){ const f=document.createElement('input'); f.id='filter'; f.type='text'; f.placeholder='filter…'; f.value=filter; f.oninput=()=>{filter=f.value.toLowerCase(); buildTools(); f.focus();}; a.appendChild(f); }
@@ -445,6 +446,16 @@ function layersPanel(a){
     row.appendChild(vb); row.appendChild(gb); row.appendChild(lab); a.appendChild(row);
   }
   const note=document.createElement('div'); note.style.cssText='font-size:11px;color:#999;margin-top:4px'; note.textContent='Select an object, press G = just it GM-only. Export uses current view.'; a.appendChild(note);
+}
+function mapsPanel(a){
+  const h=document.createElement('h3'); h.textContent='Saved maps'; a.appendChild(h);
+  for(const name of slotNames()){ const row=document.createElement('div'); row.style.cssText='display:flex;gap:4px;align-items:center;margin:2px 0;';
+    const lab=document.createElement('span'); lab.textContent=name; lab.title=name; lab.style.cssText='flex:1;min-width:0;font-size:12px;color:#ddd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    const mkb=(t,title,fn)=>{ const b=document.createElement('button'); b.textContent=t; b.title=title; b.style.cssText='padding:2px 6px;'; b.onclick=fn; return b; };
+    row.appendChild(lab); row.appendChild(mkb('Load','Load this saved map',()=>slotLoad(name))); row.appendChild(mkb('Ren','Rename this saved map',()=>slotRename(name))); row.appendChild(mkb('Del','Delete this saved map',()=>slotDelete(name)));
+    a.appendChild(row); }
+  const sv=document.createElement('button'); sv.textContent='Save as…'; sv.style.cssText='margin-top:4px;'; sv.onclick=slotSaveAs; a.appendChild(sv);
+  const note=document.createElement('div'); note.style.cssText='font-size:11px;color:#999;margin-top:4px'; note.textContent='Snapshots kept in this browser. The working map autosaves separately.'; a.appendChild(note);
 }
 function setMode(m){ M.mode=m; commitRoad(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; borderLast=null; dragging=null; curStroke=null; document.getElementById('tabWild').classList.toggle('on',m==='wild'); document.getElementById('tabDun').classList.toggle('on',m==='dun');
   tool=(m==='wild'?'terrain':'stamp'); curIcon=(m==='wild'?'Forest':(ICONS.dungeon[0]||{}).n||'Door1x1');
@@ -576,6 +587,22 @@ function loadLS(){
   loadMapObj(o);
   try{ localStorage.setItem('osrmap.bak',JSON.stringify(M)); }catch(e){}   // last-good backup, refreshed once per successful boot
 }
+// ---- saved map slots: explicit snapshots under 'osrmap.slot.<name>'; the working map autosaves to 'osrmap' as before ----
+const SLOT_PRE='osrmap.slot.';
+function slotNames(){ const o=[]; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.startsWith(SLOT_PRE))o.push(k.slice(SLOT_PRE.length)); } }catch(e){} return o.sort((a,b)=>a.localeCompare(b)); }
+function slotWrite(name,json){ try{ localStorage.setItem(SLOT_PRE+name,json); return true; }
+  catch(e){ showBanner(isQuota(e)?'Browser storage is full — couldn’t save “'+name+'”. Export with “Save .json” and delete unused saved maps.':'Couldn’t save “'+name+'” — browser storage failed.'); return false; } }
+function slotSaveAs(){ readTitle(); let name=prompt('Map name:',M.title||'map'); if(name==null)return; name=name.trim().slice(0,40); if(!name)return;
+  if(slotNames().includes(name)&&!confirm('Overwrite saved map “'+name+'”?'))return;
+  if(slotWrite(name,JSON.stringify(M)))buildTools(); }
+function slotLoad(name){ let raw=null; try{ raw=localStorage.getItem(SLOT_PRE+name); }catch(e){}
+  const o=raw?parseMap(raw):null; if(!o){ showBanner('Saved map “'+name+'” is corrupted and couldn’t be loaded.'); return; }
+  snap(); loadMapObj(o); afterLoad(); }
+function slotRename(name){ let nn=prompt('Rename “'+name+'” to:',name); if(nn==null)return; nn=nn.trim().slice(0,40); if(!nn||nn===name)return;
+  if(slotNames().includes(nn)&&!confirm('Overwrite saved map “'+nn+'”?'))return;
+  try{ const raw=localStorage.getItem(SLOT_PRE+name); if(raw==null)return; if(slotWrite(nn,raw))localStorage.removeItem(SLOT_PRE+name); }catch(e){}
+  buildTools(); }
+function slotDelete(name){ if(!confirm('Delete saved map “'+name+'”?'))return; try{ localStorage.removeItem(SLOT_PRE+name); }catch(e){} buildTools(); }
 document.getElementById('title').addEventListener('input',()=>{readTitle();render();});
 document.getElementById('scale').addEventListener('input',e=>{ const v=Math.max(0.01,+e.target.value||0); if(M.mode==='wild')M.milesPerHex=v; else M.feetPerSquare=v; render(); save(); });
 document.getElementById('tabWild').onclick=()=>setMode('wild');

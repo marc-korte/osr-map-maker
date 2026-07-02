@@ -843,7 +843,11 @@ function genWild(){
         for(const w of waters){ const d=Math.abs(w[0]-src[0])+Math.abs(w[1]-src[1]); if(d>1&&d<bd){bd=d;tgt=w;} }
         if(!tgt){ bd=1e18; for(const e of [[0,src[1]],[cols-1,src[1]],[src[0],0],[src[0],rows-1]]){ const d=Math.abs(e[0]-src[0])+Math.abs(e[1]-src[1]); if(d<bd){bd=d;tgt=e;} } }
         const rp=tgt&&hexPath([src[0],src[1]],tgt,g,rcostR);
-        if(rp&&rp.length>2){ const pts=smoothStroke(simplifyDP(rp.map(h=>hcenter(h[0],h[1],L)),L.size*0.45)), mhx=pickHex(pts[pts.length-1][0],pts[pts.length-1][1],L);   // route through hex CENTRES (clean flow, no corner zigzag); precompute name anchor + mouth
+        if(rp&&rp.length>2){ const ctr=rp.map(h=>hcenter(h[0],h[1],L)), j=L.size*0.38, wig=[ctr[0]];   // meander: jittered midpoints + centres, endpoints anchored — a straight run of hexes must never read as a straight river
+          for(let i=1;i<ctr.length;i++){ const a=ctr[i-1],b=ctr[i];
+            wig.push([(a[0]+b[0])/2+(rndf()-.5)*j,(a[1]+b[1])/2+(rndf()-.5)*j]);
+            wig.push(i<ctr.length-1?[b[0]+(rndf()-.5)*j,b[1]+(rndf()-.5)*j]:b); }
+          const pts=smoothStroke(wig), mhx=pickHex(pts[pts.length-1][0],pts[pts.length-1][1],L);   // Chaikin turns the jitter into smooth bends; precompute name anchor + mouth
           M.drawsW.push({pts,kind:'river',name:genPlaceName()+' River',nameIdx:riverNamePt(pts),mouthWater:!!(mhx&&M.hex[mhx[0]+','+mhx[1]]==='Water')}); used.push(src); } } } }
 
   function nameWaters(){   // flood-fill connected Water hexes; large bodies get a sea/lake name at their centroid

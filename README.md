@@ -14,7 +14,7 @@ browser.
 Each person who opens the link gets their own private workspace; the working
 map autosaves in that browser (localStorage), named snapshots live under
 **Saved maps** in the sidebar, and **Save .json** / **Load** move maps between
-browsers. Nothing is stored server-side. Undo/redo: Ctrl+Z / Ctrl+Y.
+browsers. Nothing is stored server-side. Undo/redo: Ctrl+Z / Ctrl+Y (macOS: Cmd+Z / Cmd+Shift+Z).
 
 ## Layout
 

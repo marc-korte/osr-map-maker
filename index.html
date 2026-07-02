@@ -893,14 +893,48 @@ function genDun(){
 }
 function doGenerate(){ if(!confirm('Generate a random '+(M.mode==='wild'?'wilderness':'dungeon')+'? This replaces the current map.'))return; (M.mode==='wild'?genWild:genDun)(); }
 
+// ---------- ?test: in-page invariant checks (dev only — add ?test to the URL; result lands in the tab title + console) ----------
+function runTests(){
+  let stash=null; try{ stash=localStorage.getItem('osrmap'); }catch(e){}
+  let n=0,f=0; const ok=(c,m)=>{ n++; if(!c){ f++; console.error('FAIL',m); } };
+  try{
+    // pure helpers
+    ok(tiles('Door2x1')[0]===2&&tiles('Door2x1')[1]===1,'tiles parses WxH');
+    ok(tiles('NoSize').join()==='1,1','tiles defaults 1x1');
+    ok(fmtScale(2.5)==='2.5'&&fmtScale(0)==='1'&&fmtScale('x')==='1','fmtScale');
+    ok(simplifyDP([[0,0],[1,0.01],[2,0]],0.5).length===2,'simplifyDP drops collinear');
+    ok(simplifyDP([[0,0],[1,5],[2,0]],0.5).length===3,'simplifyDP keeps bends');
+    ok(boxesOverlap({x:0,y:0,w:2,h:2},{x:1,y:1,w:2,h:2})&&!boxesOverlap({x:0,y:0,w:1,h:1},{x:5,y:5,w:1,h:1}),'boxesOverlap');
+    { const p=smoothStroke([[0,0],[30,0],[60,30]]); ok(p[0][0]===0&&p[0][1]===0&&p[p.length-1][0]===60&&p[p.length-1][1]===30,'smoothStroke keeps endpoints'); }
+    // load pipeline
+    ok(validateMap(null)!==null&&validateMap({a:1})!==null&&validateMap({hex:{}})===null,'validateMap signatures');
+    ok(validateMap({hex:{},syms:'nope'})!==null,'validateMap rejects bad container');
+    { const o={hex:{'0,0':'Forest'},cols:999}; migrateMap(o); ok(o.v===SCHEMA_V&&Array.isArray(o.layers)&&o.cols===120,'migrateMap fills defaults + clamps'); }
+    { const o={hex:{},drawsW:[{pts:[[0,0]]},{kind:'x'}],syms:[{x:1,y:2},{x:'a'}]}; const d=migrateMap(o); ok(d===2&&o.drawsW.length===1&&o.syms.length===1,'migrateMap drops malformed items'); }
+    // generator invariants (unseeded RNG → assert invariants, not pixels)
+    for(let i=0;i<10;i++){ setMode('wild'); genWild(); const L=layout(), RESV=legendReserveWild(L);
+      for(const k of RESV) ok(M.hex[k]==='Blank'||M.hex[k]===undefined,'wild reserve clear '+k);
+      ok(M.sites.every(s=>s.c>=0&&s.c<M.cols&&s.r>=0&&s.r<M.rows),'sites in bounds');
+      ok(M.drawsW.every(d=>d.pts.length>1),'wild strokes have 2+ pts'); }
+    for(let i=0;i<10;i++){ setMode('dun'); genDun(); const RESV=dunReserve(layout());
+      for(const k of RESV) ok(M.cells[k]!=='floor','dun reserve is rock '+k);
+      ok(M.syms.every(s=>typeof s.x==='number'&&typeof s.y==='number'),'dun syms have coords'); }
+  }catch(e){ f++; console.error('FAIL (exception)',e); }
+  try{ if(stash!=null)localStorage.setItem('osrmap',stash); }catch(e){}   // tests autosave as they generate — put the real map back
+  const o=stash?parseMap(stash):null; if(o){ loadMapObj(o); afterLoad(); }
+  document.title=(f?'FAIL ':'PASS ')+n+' checks'+(f?' ('+f+' failed)':'');
+  console.log('OSR Map Maker tests:',f?'FAIL':'PASS',n,'checks,',f,'failed');
+}
+
 // ---------- boot ----------
-// (dev demo fixtures removed for production — use ?gw / ?gd to generate sample maps, ?dev to expose window.MM)
+// (dev demo fixtures removed for production — use ?gw / ?gd to generate sample maps, ?dev to expose window.MM, ?test to run checks)
 function boot(){
   loadLS();
   document.getElementById('title').value=M.title||'THE HUSH'; document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows;
   setMode(M.mode||'wild'); const vb=document.getElementById('view'); vb.textContent=(M.view==='gm'?'GM view':'Player view'); vb.classList.toggle('on',M.view==='player'); if(location.search.includes('player'))setView('player');
   if(location.search.includes('gw')){setMode('wild');genWild();} else if(location.search.includes('gd')){setMode('dun');genDun();}
   if(location.search.includes('dev'))window.MM=M;
+  if(location.search.includes('test'))runTests();
 }
 let pending=0,started=false,failedIcons=0;
 const iconDone=()=>{ pending--; if(pending===0&&started){ render(); if(failedIcons)showBanner(failedIcons+' map icon'+(failedIcons>1?'s':'')+' failed to load — showing placeholders. Your map data is intact.'); } };

@@ -90,11 +90,11 @@ const cwrap=document.querySelector('.canvaswrap');
 let zoom=1, panX=0, panY=0;
 let LW=0,LH=0, cullRect=null;
 const DPR=()=>window.devicePixelRatio||1;
-function clampPan(){ const vw=cwrap.clientWidth/zoom, vh=cwrap.clientHeight/zoom, m=120;
+function clampPan(){ const vw=cwrap.clientWidth/zoom, vh=cwrap.clientHeight/zoom, m=PAN_MARGIN;
   panX = LW<=vw ? (LW-vw)/2 : Math.max(-m,Math.min(LW-vw+m,panX));
   panY = LH<=vh ? (LH-vh)/2 : Math.max(-m,Math.min(LH-vh+m,panY)); }
 function applyZoom(){ const l=document.getElementById('zoomlbl'); if(l)l.textContent=Math.round(zoom*100)+'%'; }
-function zoomAt(factor, clientX, clientY){ const nz=Math.max(0.04,Math.min(8,zoom*factor)); if(Math.abs(nz-zoom)<1e-4)return; const r=cv.getBoundingClientRect(); if(clientX==null){ clientX=r.left+r.width/2; clientY=r.top+r.height/2; }
+function zoomAt(factor, clientX, clientY){ const nz=Math.max(ZOOM_MIN,Math.min(ZOOM_MAX,zoom*factor)); if(Math.abs(nz-zoom)<1e-4)return; const r=cv.getBoundingClientRect(); if(clientX==null){ clientX=r.left+r.width/2; clientY=r.top+r.height/2; }
   const lx=panX+(clientX-r.left)/zoom, ly=panY+(clientY-r.top)/zoom;     // keep the logical point under the cursor fixed
   zoom=nz; panX=lx-(clientX-r.left)/zoom; panY=ly-(clientY-r.top)/zoom; render(); }
 function zoomReset(){ zoom=1; render(); }
@@ -107,6 +107,11 @@ const SS=3;                 // export supersample -> 300 dpi when 100 logical px
 const PPI=100;              // logical pixels per inch
 const DUN_CELL=PPI/4;       // dungeon square = 1/4 inch (25 logical px)
 const WILD_HEX=46;          // wilderness hex circumradius (constant) — canvas grows with the grid so hexes stay crisp & legible
+const PAN_MARGIN=120;       // how far past the map edge panning may go (logical px)
+const ZOOM_MIN=0.04, ZOOM_MAX=8;   // manual zoom bounds (zoomFit may go smaller)
+const PICK_SITE2=900, PICK_SYM2=1300, PICK_STROKE2=140, ERASE_STROKE2=400;   // SQUARED pick radii (logical px²)
+const UNDO_MAX=50;
+const SEL='#c9a227';  // selection gold (matches CSS --hl)
 const ICONS=window.ICONS||{hex:[],dungeon:[]};
 const BY={hex:{},dungeon:{}}; for(const s of ['hex','dungeon']) for(const it of ICONS[s]) BY[s][it.n]=it;
 const IMG={hex:{},dungeon:{}};
@@ -133,7 +138,7 @@ let hoverX=null,hoverY=null,ghostPending=false;    // cursor preview
 let selHex=null, curStroke=null;                   // selected hex / live freehand stroke
 function curDraws(){ return M.mode==='wild'?M.drawsW:M.drawsD; }
 let selDraw=-1, dragPrev={x:0,y:0}, borderLast=null;
-function pickStroke(px,py){ const a=curDraws(); let bi=-1,bd=140; a.forEach((d,i)=>{for(const p of d.pts){const dd=(p[0]-px)**2+(p[1]-py)**2; if(dd<bd){bd=dd;bi=i;}}}); return bi; }
+function pickStroke(px,py){ const a=curDraws(); let bi=-1,bd=PICK_STROKE2; a.forEach((d,i)=>{for(const p of d.pts){const dd=(p[0]-px)**2+(p[1]-py)**2; if(dd<bd){bd=dd;bi=i;}}}); return bi; }
 function snapPt(px,py,L){ if(!M.snap||M.mode!=='dun')return[px,py]; const c=L.cell; return [L.ox+(Math.floor((px-L.ox)/c)+0.5)*c, L.oy+(Math.floor((py-L.oy)/c)+0.5)*c]; }
 function lyr(id){ const L=M.layers&&M.layers.find(x=>x.id===id); return L?(L.vis&&!(M.view==='player'&&L.gm)):true; }
 function og(o){ return !(M.view==='player'&&o&&o.gm); }
@@ -141,11 +146,11 @@ function gmDot(g,x,y){ if(M.view==='gm'){ g.save(); g.fillStyle='#e11'; g.beginP
 let selLabel=-1, selSite=-1;
 function tT(){ if(M.mode==='dun'){ return (sel>=0&&M.syms[sel]&&M.syms[sel].icon)?M.syms[sel]:stampT; }
   if(selHex&&M.hex[selHex]){ let h=M.hex[selHex]; if(typeof h==='string'){h={n:h,rot:0,fx:false,fy:false,inv:false};M.hex[selHex]=h;} return h; } return stampT; }
-function eraseNearestStroke(px,py){ const a=curDraws(); let bi=-1,bd=400; a.forEach((d,i)=>{for(const p of d.pts){const dd=(p[0]-px)**2+(p[1]-py)**2; if(dd<bd){bd=dd;bi=i;}}}); if(bi>=0)a.splice(bi,1); }
+function eraseNearestStroke(px,py){ const a=curDraws(); let bi=-1,bd=ERASE_STROKE2; a.forEach((d,i)=>{for(const p of d.pts){const dd=(p[0]-px)**2+(p[1]-py)**2; if(dd<bd){bd=dd;bi=i;}}}); if(bi>=0)a.splice(bi,1); }
 const undoStack=[], redoStack=[];
 function stateStr(){ return JSON.stringify({hex:M.hex,sites:M.sites,roads:M.roads,cells:M.cells,syms:M.syms,labels:M.labels,drawsW:M.drawsW,drawsD:M.drawsD}); }
-function snap(){ undoStack.push(stateStr()); if(undoStack.length>50)undoStack.shift(); redoStack.length=0; }   // any new action invalidates redo
-function undo(){ const s=undoStack.pop(); if(!s)return; redoStack.push(stateStr()); if(redoStack.length>50)redoStack.shift(); Object.assign(M,JSON.parse(s)); render(); save(); }
+function snap(){ undoStack.push(stateStr()); if(undoStack.length>UNDO_MAX)undoStack.shift(); redoStack.length=0; }   // any new action invalidates redo
+function undo(){ const s=undoStack.pop(); if(!s)return; redoStack.push(stateStr()); if(redoStack.length>UNDO_MAX)redoStack.shift(); Object.assign(M,JSON.parse(s)); render(); save(); }
 function redo(){ const s=redoStack.pop(); if(!s)return; undoStack.push(stateStr()); Object.assign(M,JSON.parse(s)); render(); save(); }   // direct push, not snap() → keeps redo history intact
 
 // ---------- geometry ----------
@@ -218,9 +223,9 @@ function placeLabels(g,reqs,placed){
     if(!chosen){ px=11; const ax=q.cx, ay=q.cy+0.74*s, box=labelBox(g,q.text,px,ax,ay); chosen=[ax,ay,box,0]; }   // last resort: shrink, keep below
     const[ax,ay,box,nudged]=chosen; placed.push(box);
     if(nudged){ g.save(); g.globalAlpha=0.45; g.strokeStyle=INK; g.lineWidth=0.8; g.beginPath(); g.moveTo(q.cx,q.cy+0.5*s); g.lineTo(ax, box.y); g.stroke(); g.restore(); }
-    if(q.sel){ g.save(); g.fillStyle='#c9a227'; g.globalAlpha=0.3; g.fillRect(box.x-1,box.y-1,box.w+2,box.h+2); g.restore(); }   // selected name: gold highlight
+    if(q.sel){ g.save(); g.fillStyle=SEL; g.globalAlpha=0.3; g.fillRect(box.x-1,box.y-1,box.w+2,box.h+2); g.restore(); }   // selected name: gold highlight
     haloTxt(g,ax,ay,q.text,false,px);
-    if(q.sel){ g.save(); g.strokeStyle='#c9a227'; g.lineWidth=1.6; g.strokeRect(box.x-1,box.y-1,box.w+2,box.h+2); g.restore(); } }
+    if(q.sel){ g.save(); g.strokeStyle=SEL; g.lineWidth=1.6; g.strokeRect(box.x-1,box.y-1,box.w+2,box.h+2); g.restore(); } }
 }
 function drawRoute(g,pts,style){ g.save(); g.setLineDash(style==='path'?[3,7]:[12,8]); g.strokeStyle=INK; g.lineWidth=style==='path'?1.6:2.8; g.beginPath(); pts.forEach((p,i)=>i?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1])); g.stroke(); g.restore(); }
 function smoothPath(g,pts){ g.beginPath(); g.moveTo(pts[0][0],pts[0][1]); if(pts.length===2){g.lineTo(pts[1][0],pts[1][1]);return;} for(let i=1;i<pts.length-1;i++){ const mx=(pts[i][0]+pts[i+1][0])/2,my=(pts[i][1]+pts[i+1][1])/2; g.quadraticCurveTo(pts[i][0],pts[i][1],mx,my);} g.lineTo(pts[pts.length-1][0],pts[pts.length-1][1]); }
@@ -292,7 +297,7 @@ function drawGhost(){ if(hoverX==null)return; const L=layout(); ctx.save(); ctx.
     else if(tool==='key'){ disc(ctx,hoverX,hoverY,11,INK); }
   } else if(M.mode==='wild'){
     if(tool==='terrain'&&curIcon){ const hx=pickHex(hoverX,hoverY,L); if(hx){const[x,y]=hcenter(hx[0],hx[1],L); drawIconT(ctx,'hex',curIcon,x,y,L.size*1.68,L.size*1.52,stampT);} }
-    else if(tool==='borderedge'){ const hx=pickHex(hoverX,hoverY,L); if(hx){ const[cx,cy]=hcenter(hx[0],hx[1],L),cs=hcorners(cx,cy,L.size); let bi=0,bd=1e9; for(let i=0;i<6;i++){const a=cs[i],b=cs[(i+1)%6],mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2,dd=(mx-hoverX)**2+(my-hoverY)**2; if(dd<bd){bd=dd;bi=i;}} const a=cs[bi],b=cs[(bi+1)%6]; ctx.globalAlpha=0.85; ctx.strokeStyle='#c9a227'; ctx.lineWidth=4; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); } }
+    else if(tool==='borderedge'){ const hx=pickHex(hoverX,hoverY,L); if(hx){ const[cx,cy]=hcenter(hx[0],hx[1],L),cs=hcorners(cx,cy,L.size); let bi=0,bd=1e9; for(let i=0;i<6;i++){const a=cs[i],b=cs[(i+1)%6],mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2,dd=(mx-hoverX)**2+(my-hoverY)**2; if(dd<bd){bd=dd;bi=i;}} const a=cs[bi],b=cs[(bi+1)%6]; ctx.globalAlpha=0.85; ctx.strokeStyle=SEL; ctx.lineWidth=4; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); } }
   }
   ctx.restore();
 }
@@ -308,13 +313,13 @@ function drawWild(g,W,H){
   for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const[x,y]=hcenter(c,r,L); if(!inCull(x,y))continue; poly(g,hcorners(x,y,L.size),null,GRID,1); }
   // roads/rivers under the terrain symbols: they stay continuous and the symbols sit cleanly on top (not overprinted)
   if(lyr('lines')){ for(const[pts,style]of M.roads) drawRoute(g,pts.map(p=>hcenter(p[0],p[1],L)),style); if(M.curRoad) drawRoute(g,M.curRoad.map(p=>hcenter(p[0],p[1],L)),M.curStyle);
-    M.drawsW.forEach((d,i)=>{ if(!og(d)||d.kind==='road')return; if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle='#c9a227';g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();} drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); }); if(curStroke&&M.mode==='wild') drawStroke(g,curStroke); }   // rivers/trails/borders under terrain; roads drawn on top below
+    M.drawsW.forEach((d,i)=>{ if(!og(d)||d.kind==='road')return; if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle=SEL;g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();} drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); }); if(curStroke&&M.mode==='wild') drawStroke(g,curStroke); }   // rivers/trails/borders under terrain; roads drawn on top below
   if(lyr('terrain')) for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const key=c+','+r,t=M.hex[key]; if(!t||!og(t))continue; const[x,y]=hcenter(c,r,L); if(!inCull(x,y))continue; const name=(typeof t==='string')?t:t.n;
     if(name==='Water'){ poly(g,hcorners(x,y,L.size),WATERC,GRID,1); if(t&&t.gm)gmDot(g,x+L.size*0.66,y-L.size*0.66); continue; }   // water = solid grey hex
     if(name==='Blank'){ if(t&&t.gm)gmDot(g,x+L.size*0.66,y-L.size*0.66); continue; }                                            // blank = empty hex
     const tr=(typeof t==='string')?null:t; drawIconT(g,'hex',name,x,y,L.size*1.68,L.size*1.52,tr); if(t&&t.gm)gmDot(g,x+L.size*0.66,y-L.size*0.66); }   // all terrain = its hex icon
   if(lyr('lines')) M.drawsW.forEach((d,i)=>{ if(!og(d)||d.kind!=='road')return;   // roads ON TOP of terrain with a paper casing → a clean route cut through forest/hills, not tangled behind tree icons
-    if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle='#c9a227';g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();}
+    if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle=SEL;g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();}
     drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); });
   { const reqs=[], SETTLE=['Castle','Capital','City','Town','Village','Keep','Fort','Tower']; let n=0;
     for(const s of M.sites){ if(!og(s))continue; const[x,y]=hcenter(s.c,s.r,L);
@@ -326,7 +331,7 @@ function drawWild(g,W,H){
     const placed=[];                                                                                          // river names are obstacles labels should avoid
     for(const d of M.drawsW){ if(d.kind==='river'&&d.name&&og(d)){ const m=d.pts[(d.nameIdx!=null)?d.nameIdx:riverNamePt(d.pts)]; placed.push(labelBox(g,d.name,12,m[0],m[1]-7)); } }
     if(lyr('text')) placeLabels(g,reqs,placed); }
-  if(selHex&&M.hex[selHex]){ const p=selHex.split(',').map(Number),[x,y]=hcenter(p[0],p[1],L); g.save(); g.setLineDash([5,4]); poly(g,hcorners(x,y,L.size*0.94),null,'#c9a227',2); g.restore(); }
+  if(selHex&&M.hex[selHex]){ const p=selHex.split(',').map(Number),[x,y]=hcenter(p[0],p[1],L); g.save(); g.setLineDash([5,4]); poly(g,hcorners(x,y,L.size*0.94),null,SEL,2); g.restore(); }
   cartouche(g,W/2,52,M.title); compass(g,W-78,150);
   { const sb=scalebarAnchorWild(L); scalebar(g,sb.x,sb.y,L.hw,Math.min(6,M.cols),'1 hex ≈ '+fmtScale(M.milesPerHex||1)+' mile'+((M.milesPerHex||1)==1?'':'s')); }
   const fieldL=L.ox-L.hw*0.5, fieldR=L.ox+L.hw*M.cols, fieldT=L.oy-L.size, fieldB=L.oy+1.5*L.size*(M.rows-1)+L.size;
@@ -370,9 +375,9 @@ function drawDun(g,W,H){
   g.strokeStyle=INK;g.lineWidth=2.6;g.strokeRect(x0,y0,x1-x0,y1-y0);
   }
   let kn=0; M.syms.forEach(s=>{ if(s.type==='key'){kn++; s.n=kn;} });
-  M.syms.forEach((s,i)=>{ const isKey=s.type==='key'; const on=(isKey?lyr('keys'):lyr('symbols'))&&og(s); if(!on)return; if(isKey){ const t=String(s.n||'#'), kr=t.length>1?11:10; disc(g,s.x,s.y,kr,INK); txt(g,s.x,s.y,t,kr*1.05,true,PAP); } else { const[tw,th]=tiles(s.icon); drawIconT(g,'dungeon',s.icon,s.x,s.y,L.cell*tw*0.96,L.cell*th*0.96,s); } if(s.gm)gmDot(g,s.x+L.cell*0.5,s.y-L.cell*0.5); if(i===sel){ g.save(); g.setLineDash([5,4]); g.strokeStyle='#c9a227'; g.lineWidth=2; g.strokeRect(s.x-L.cell*0.62,s.y-L.cell*0.62,L.cell*1.24,L.cell*1.24); g.restore(); } });
+  M.syms.forEach((s,i)=>{ const isKey=s.type==='key'; const on=(isKey?lyr('keys'):lyr('symbols'))&&og(s); if(!on)return; if(isKey){ const t=String(s.n||'#'), kr=t.length>1?11:10; disc(g,s.x,s.y,kr,INK); txt(g,s.x,s.y,t,kr*1.05,true,PAP); } else { const[tw,th]=tiles(s.icon); drawIconT(g,'dungeon',s.icon,s.x,s.y,L.cell*tw*0.96,L.cell*th*0.96,s); } if(s.gm)gmDot(g,s.x+L.cell*0.5,s.y-L.cell*0.5); if(i===sel){ g.save(); g.setLineDash([5,4]); g.strokeStyle=SEL; g.lineWidth=2; g.strokeRect(s.x-L.cell*0.62,s.y-L.cell*0.62,L.cell*1.24,L.cell*1.24); g.restore(); } });
   if(lyr('text')) for(const l of M.labels){ if(!og(l))continue; haloTxt(g,l.x,l.y,l.text,false,13); if(l.gm)gmDot(g,l.x,l.y-12); }
-  if(lyr('lines')){ M.drawsD.forEach((d,i)=>{ if(!og(d))return; if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle='#c9a227';g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();} drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); }); if(curStroke&&M.mode==='dun') drawStroke(g,curStroke); }
+  if(lyr('lines')){ M.drawsD.forEach((d,i)=>{ if(!og(d))return; if(i===selDraw){g.save();g.globalAlpha=.6;g.strokeStyle=SEL;g.lineWidth=9;g.lineJoin='round';g.lineCap='round';smoothPath(g,d.pts);g.stroke();g.restore();} drawStroke(g,d); if(d.gm)gmDot(g,d.pts[0][0],d.pts[0][1]); }); if(curStroke&&M.mode==='dun') drawStroke(g,curStroke); }
   cartouche(g,W/2,52,M.title); compass(g,W-78,150);
   // key + ruler sit ON the map (over rock reserved & kept clear at generation), bottoms aligned near the frame floor
   const a=legendAnchorDun(L);
@@ -484,7 +489,7 @@ function apply(px,py,first){
   if(M.mode==='wild'){
     if(tool==='terrain'||tool==='erasehex'||tool==='water'){ const hx=pickHex(px,py,L); if(hx){ if(first)snap(); const k=hx[0]+','+hx[1]; if(tool==='erasehex')delete M.hex[k]; else if(tool==='water')M.hex[k]='Water'; else M.hex[k]={n:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}; } }
     else if(tool==='select'){
-      if(first){ snap(); selHex=null; selDraw=-1; selSite=-1; dragging=null; dragPrev={x:px,y:py}; let bi=-1,bd=900; M.sites.forEach((s,i)=>{const[x,y]=hcenter(s.c,s.r,L);const d=(x-px)**2+(y-py)**2;if(d<bd){bd=d;bi=i;}}); if(bi>=0){selSite=bi; dragging={k:'site',i:bi};} else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};} else { const hx=pickHex(px,py,L); if(hx&&M.hex[hx[0]+','+hx[1]]){selHex=hx[0]+','+hx[1];} } } buildTools(); }   // select a hex (for Del/G) but DON'T grab it → empty/terrain drag falls through to pan, like the dungeon
+      if(first){ snap(); selHex=null; selDraw=-1; selSite=-1; dragging=null; dragPrev={x:px,y:py}; let bi=-1,bd=PICK_SITE2; M.sites.forEach((s,i)=>{const[x,y]=hcenter(s.c,s.r,L);const d=(x-px)**2+(y-py)**2;if(d<bd){bd=d;bi=i;}}); if(bi>=0){selSite=bi; dragging={k:'site',i:bi};} else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};} else { const hx=pickHex(px,py,L); if(hx&&M.hex[hx[0]+','+hx[1]]){selHex=hx[0]+','+hx[1];} } } buildTools(); }   // select a hex (for Del/G) but DON'T grab it → empty/terrain drag falls through to pan, like the dungeon
       else if(dragging){ if(dragging.k==='draw'){ const d=curDraws()[dragging.i]; if(d){const dx=px-dragPrev.x,dy=py-dragPrev.y; for(const p of d.pts){p[0]+=dx;p[1]+=dy;}} dragPrev={x:px,y:py}; } else { const hx=pickHex(px,py,L); if(hx){ if(dragging.k==='site'){M.sites[dragging.i].c=hx[0];M.sites[dragging.i].r=hx[1];} else if(dragging.k==='hex'){ const nk=hx[0]+','+hx[1]; if(nk!==selHex){ M.hex[nk]=M.hex[selHex]; delete M.hex[selHex]; selHex=nk; } } } } }
     }
     else if(!first)return;
@@ -492,13 +497,13 @@ function apply(px,py,first){
   } else {
     if(tool==='floor'||tool==='rock'){ const c=pickCell(px,py,L); if(c){ if(first)snap(); if(tool==='floor')M.cells[c[0]+','+c[1]]='floor'; else delete M.cells[c[0]+','+c[1]]; } }
     else if(tool==='select'){
-      if(first){ snap(); sel=-1; selDraw=-1; selLabel=-1; dragging=null; dragPrev={x:px,y:py}; let bi=-1,bd=1300; M.syms.forEach((s,i)=>{const d=(s.x-px)**2+(s.y-py)**2; if(d<bd){bd=d;bi=i;}}); if(bi>=0){sel=bi; dragging={k:'s',i:bi};} else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};} else { let li=-1,ld=1300; M.labels.forEach((l,i)=>{const d=(l.x-px)**2+(l.y-py)**2; if(d<ld){ld=d;li=i;}}); if(li>=0){selLabel=li;dragging={k:'l',i:li};} } } buildTools(); }
+      if(first){ snap(); sel=-1; selDraw=-1; selLabel=-1; dragging=null; dragPrev={x:px,y:py}; let bi=-1,bd=PICK_SYM2; M.syms.forEach((s,i)=>{const d=(s.x-px)**2+(s.y-py)**2; if(d<bd){bd=d;bi=i;}}); if(bi>=0){sel=bi; dragging={k:'s',i:bi};} else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};} else { let li=-1,ld=PICK_SYM2; M.labels.forEach((l,i)=>{const d=(l.x-px)**2+(l.y-py)**2; if(d<ld){ld=d;li=i;}}); if(li>=0){selLabel=li;dragging={k:'l',i:li};} } } buildTools(); }
       else if(dragging){ if(dragging.k==='draw'){ const d=curDraws()[dragging.i]; if(d){const dx=px-dragPrev.x,dy=py-dragPrev.y; for(const p of d.pts){p[0]+=dx;p[1]+=dy;}} dragPrev={x:px,y:py}; } else if(dragging.k==='s'){ const o=M.syms[dragging.i]; if(o){const[sx,sy]=snapPt(px,py,L); o.x=sx; o.y=sy;} } else { const o=M.labels[dragging.i]; if(o){o.x=px;o.y=py;} } }
     }
     else if(!first)return;
     else if(tool==='label'){ snap(); const t=prompt('Label text:',''); if(t)M.labels.push({x:px,y:py,text:t}); }
     else if(tool==='key'){ snap(); const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,type:'key'}); sel=M.syms.length-1; buildTools(); }
-    else if(tool==='erase'){ snap(); let bi=-1,bd=1300; M.syms.forEach((s,i)=>{const d=(s.x-px)**2+(s.y-py)**2;if(d<bd){bd=d;bi=i;}}); if(bi>=0)M.syms.splice(bi,1); else{let li=-1;M.labels.forEach((l,i)=>{if((l.x-px)**2+(l.y-py)**2<1300)li=i;});if(li>=0)M.labels.splice(li,1);} sel=-1; buildTools(); }
+    else if(tool==='erase'){ snap(); let bi=-1,bd=PICK_SYM2; M.syms.forEach((s,i)=>{const d=(s.x-px)**2+(s.y-py)**2;if(d<bd){bd=d;bi=i;}}); if(bi>=0)M.syms.splice(bi,1); else{let li=-1;M.labels.forEach((l,i)=>{if((l.x-px)**2+(l.y-py)**2<PICK_SYM2)li=i;});if(li>=0)M.labels.splice(li,1);} sel=-1; buildTools(); }
     else if(tool==='stamp'){ snap(); const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,icon:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}); sel=M.syms.length-1; buildTools(); }
   }
   render();

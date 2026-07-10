@@ -10,7 +10,7 @@
   body{ margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:#1d1d1d; color:#eee; height:100vh; display:flex; flex-direction:column; }
   header{ background:var(--bar); padding:8px 12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; border-bottom:2px solid #000; }
   header h1{ font-size:15px; margin:0 6px 0 0; letter-spacing:.06em; font-weight:800; }
-  input[type=text]{ background:#111; color:#eee; border:1px solid #555; border-radius:4px; padding:5px 8px; font-size:13px; }
+  input[type=text]{ background:#111; color:#eee; border:1px solid #555; border-radius:4px; padding:5px 8px; font-size:16px; }   /* 16px: keeps iOS Safari from auto-zooming when a field is focused */
   button{ background:var(--bar2); color:#eee; border:1px solid #555; border-radius:5px; padding:6px 10px; font-size:12px; cursor:pointer; }
   button:hover{ background:#4a4a4a; }
   button.on{ background:var(--hl); color:#111; border-color:var(--hl); font-weight:700; }
@@ -31,7 +31,7 @@
   canvas{ background:#fff; box-shadow:0 4px 24px rgba(0,0,0,.5); display:block; touch-action:none; }
   #zoomlbl{ min-width:52px; }
   footer{ background:var(--bar); padding:6px 12px; font-size:12px; color:#bbb; border-top:2px solid #000; }
-  label.num{ font-size:12px; color:#ccc; } input[type=number]{ width:44px; background:#111; color:#eee; border:1px solid #555; border-radius:4px; padding:3px; }
+  label.num{ font-size:12px; color:#ccc; } input[type=number]{ width:52px; background:#111; color:#eee; border:1px solid #555; border-radius:4px; padding:3px; font-size:16px; }   /* 16px: no iOS focus-zoom; 52px fits 3 digits (120) at that size */
   kbd{ background:#111; border:1px solid #555; border-radius:3px; padding:1px 5px; font-size:11px; }
   #menuToggle,#helpToggle{ display:none; }
   .backdrop{ display:none; }
@@ -472,6 +472,8 @@ function buildTools(){
     const t=tT();
     const mk=(lab,kind,on)=>{const b=document.createElement('button');b.className='tool'+(on?' on':'');press(b,on);b.textContent=lab;b.onclick=()=>applyT(kind);a.appendChild(b);};
     mk('Rotate '+(t.rot||0)+'°','rot',(t.rot||0)!==0); mk('Flip ↔','fx',!!t.fx); mk('Flip ↕','fy',!!t.fy); mk('Invert','inv',!!t.inv);
+    const anySel=(selDraw>=0&&curDraws()[selDraw])||(M.mode==='dun'?(sel>=0&&M.syms[sel]||selLabel>=0&&M.labels[selLabel]):(selSite>=0&&M.sites[selSite]||selHex&&M.hex[selHex]));   // any deletable selection, any kind
+    const db=document.createElement('button'); db.className='tool'; db.textContent='Delete'; db.disabled=!anySel; db.style.color=anySel?'#f2b8b8':''; db.title='Delete the selected item (Del)'; db.onclick=deleteSelection; a.appendChild(db);   // on-screen parity for the Del key (touch has no keyboard)
     const editing=(M.mode==='dun'?sel>=0:!!selHex);
     const tip=document.createElement('div'); tip.style.cssText='font-size:11px;color:#999;margin-top:4px'; tip.textContent=(editing?'Editing selection. ':'Sets next stamp. ')+'Keys: R H V I'; a.appendChild(tip);
   }
@@ -581,6 +583,7 @@ function apply(px,py,first){
 }
 let dragging=null;
 function applyT(kind){ if(ptrs.size>0)return; beginChange(); const t=tT(); if(kind==='rot')t.rot=((t.rot||0)+90)%360; else t[kind]=!t[kind]; sync(); commitChange(); }   // skip mid-gesture: a keyboard transform during a pointer drag would corrupt the open transaction
+function deleteSelection(){ if(ptrs.size>0)return; const s=selection(); if(s){ beginChange(); s.del(); sync(); commitChange(); } }   // shared by the Del/Backspace key and the on-screen Delete button
 // Pointer Events unify mouse / pen / touch. Two simultaneous pointers = pinch-zoom + pan.
 const ptrs=new Map(); let pinching=false, pinchDist=0, pinchMid=null, panning=false, panLast=null, spaceHeld=false;
 function ptrArr(){ return [...ptrs.values()]; }
@@ -618,13 +621,17 @@ window.addEventListener('keydown',e=>{ const typing=document.activeElement&&docu
   const k=e.key.toLowerCase();
   if(k==='r')applyT('rot'); else if(k==='h')applyT('fx'); else if(k==='v')applyT('fy'); else if(k==='i')applyT('inv');
   else if(k==='g'){ if(ptrs.size>0)return; const s=selection(); if(s){ beginChange(); s.o.gm=!s.o.gm; sync(); commitChange(); } }   // skip mid-gesture (would corrupt the drag's open transaction)
-  else if(k==='delete'||k==='backspace'){ if(ptrs.size>0)return; const s=selection(); if(s){ beginChange(); s.del(); sync(); commitChange(); } } });
+  else if(k==='delete'||k==='backspace'){ deleteSelection(); } });
 window.addEventListener('keyup',e=>{ if(e.key===' '||e.code==='Space'){ spaceHeld=false; if(!panning)setCursor(); } });
 
 // ---------- persistence + export ----------
 function readTitle(){ const v=document.getElementById('title').value; M.title=v; if(M.mode==='wild')M.titleW=v; else M.titleD=v; }
 function showBanner(msg){ const b=document.getElementById('banner'),m=document.getElementById('bannermsg'); if(!b||!m)return; m.textContent=msg; b.style.display='block'; }
 { const bx=document.getElementById('bannerx'); if(bx)bx.onclick=()=>{document.getElementById('banner').style.display='none';}; }
+// iOS Safari ignores the download attr and blocks a.click()/window.open outside the tap gesture → these downloads need a new-tab (long-press/Share) fallback.
+const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Mac/.test(navigator.platform));
+const IOS_DATAURL_MAX=5e6;   // above this a data: URL is too big to navigate to reliably → use a blob URL in a new tab instead
+let iosTold=false; function iosSaveTip(){ if(iosTold)return; iosTold=true; showBanner('Opened in a new tab — long-press it (or use the Share button) to save.'); }
 let saveWarned=false;
 const isQuota=e=>!!e&&(e.name==='QuotaExceededError'||e.code===22);
 function save(){ readTitle(); try{ localStorage.setItem('osrmap',JSON.stringify(M)); saveWarned=false; }
@@ -713,7 +720,9 @@ function applyResize(){ const mn=(M.mode==='wild'?WILD_MIN:DUN_MIN);
   pruneOutOfBounds(); commitChange(); render(); maybeFit(); save(); }
 document.getElementById('cols').addEventListener('change',applyResize);   // auto-resize on commit (Enter/blur) — no Resize button
 document.getElementById('rows').addEventListener('change',applyResize);
-document.getElementById('save').onclick=()=>{ readTitle(); const b=new Blob([JSON.stringify(M)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=(M.title||'map').replace(/\W+/g,'_')+'.json'; a.click(); };
+document.getElementById('save').onclick=()=>{ readTitle(); const b=new Blob([JSON.stringify(M)],{type:'application/json'}); const url=URL.createObjectURL(b);
+  if(isIOS){ const w=window.open('','_blank'); if(w)w.location.href=url; else window.open(url,'_blank'); iosSaveTip(); return; }   // iOS: new tab (download attr ignored)
+  const a=document.createElement('a'); a.href=url; a.download=(M.title||'map').replace(/\W+/g,'_')+'.json'; a.click(); };
 document.getElementById('load').onclick=()=>document.getElementById('file').click();
 document.getElementById('file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
   rd.onload=()=>{ let o; try{ o=JSON.parse(rd.result); }catch(err){ showBanner('Couldn’t load “'+f.name+'”: not valid JSON ('+(err&&err.message||err)+').'); return; }
@@ -723,12 +732,17 @@ document.getElementById('file').onchange=e=>{ const f=e.target.files[0]; if(!f)r
 const MAX_EXPORT_PX=16e6;   // Safari/iOS cap is ~16.7MP; stay under or the canvas exports blank
 document.getElementById('export').onclick=()=>{ readTitle();
   let ss=SS; while(ss>1 && LW*ss*LH*ss>MAX_EXPORT_PX) ss--;   // drop supersample to fit
-  if(LW*ss*LH*ss>MAX_EXPORT_PX && !confirm('This map is very large — the exported image may fail or look low-res in some browsers. Export anyway?')) return;
-  const out=document.createElement('canvas'); out.width=Math.round(LW*ss); out.height=Math.round(LH*ss);
+  let s=ss; if(LW*s*LH*s>MAX_EXPORT_PX) s=Math.sqrt(MAX_EXPORT_PX/(LW*LH));   // even ss=1 exceeds the cap (huge maps) → shrink below native so the export always fits and toBlob never returns null on iOS
+  const out=document.createElement('canvas'); out.width=Math.round(LW*s); out.height=Math.round(LH*s);
   const free=()=>{ out.width=out.height=0; };
-  try{ const g=out.getContext('2d'); g.scale(ss,ss); g.fillStyle=PAP; g.fillRect(0,0,LW,LH); cullRect=null; (M.mode==='wild'?drawWild:drawDun)(g,LW,LH); }   // cullRect=null → export the whole map, not just the viewport
+  try{ const g=out.getContext('2d'); g.scale(s,s); g.fillStyle=PAP; g.fillRect(0,0,LW,LH); cullRect=null; (M.mode==='wild'?drawWild:drawDun)(g,LW,LH); }   // cullRect=null → export the whole map, not just the viewport; a fractional scale is fine (everything draws through ctx transforms)
   catch(err){ free(); showBanner('Export failed while drawing the map: '+(err&&err.message||err)); return; }
   const fname=(M.title||'map').replace(/\W+/g,'_')+'_'+(M.view==='player'?'player':'GM')+'.png';
+  if(isIOS){   // stay inside the tap gesture: toDataURL is synchronous; the blob new-tab pre-opens its window in the gesture (a.click/window.open in an async toBlob callback would be blocked)
+    try{ if(out.width*out.height<=IOS_DATAURL_MAX){ const a=document.createElement('a'); a.href=out.toDataURL('image/png'); a.download=fname; a.target='_blank'; a.click(); iosSaveTip(); free(); }
+      else{ const w=window.open('','_blank'); out.toBlob(b=>{ if(b){ const url=URL.createObjectURL(b); if(w)w.location.href=url; else window.open(url,'_blank'); } free(); },'image/png'); iosSaveTip(); } }
+    catch(err){ free(); showBanner('Export failed: '+(err&&err.message||err)); }
+    return; }
   try{ out.toBlob(b=>{ if(!b){ free(); showBanner('Export failed — the image is too large for this browser. Try fewer rows/cols, then export again.'); return; }
       const url=URL.createObjectURL(b),a=document.createElement('a'); a.href=url; a.download=fname; a.click();
       setTimeout(()=>{ URL.revokeObjectURL(url); free(); },1000); },'image/png'); }
@@ -1145,6 +1159,17 @@ function runTests(){
       M.drawsW=svW; M.colsW=svc;M.rowsW=svr;M.cols=svc;M.rows=svr; fitCanvas(); }
     // a no-op transaction (nothing changed between begin/commit) leaves undo history untouched
     { const ul=undoStack.length; beginChange(); commitChange(); ok(undoStack.length===ul,'no-op commitChange adds no undo entry'); }
+    // deleteSelection: the on-screen Delete button shares this path — deleting a label drops it and records one undo entry
+    ok(typeof deleteSelection==='function','deleteSelection is defined');
+    { setMode('dun'); const svL=M.labels.slice(); M.labels.push({x:200,y:200,text:'X'});
+      sel=-1; selDraw=-1; selSite=-1; selHex=null; selLabel=M.labels.length-1;
+      const before=M.labels.length, ul=undoStack.length; deleteSelection();
+      ok(M.labels.length===before-1&&undoStack.length===ul+1,'deleteSelection removes the label and pushes one undo entry');
+      M.labels=svL; selLabel=-1; }
+    // export downscale: a base area above the cap gets scaled so the output stays within MAX_EXPORT_PX (else iOS toBlob → null)
+    { const lw=8000,lh=11000; ok(lw*lh>MAX_EXPORT_PX,'export test fixture (88MP) exceeds the cap');
+      let es=1; if(lw*es*lh*es>MAX_EXPORT_PX) es=Math.sqrt(MAX_EXPORT_PX/(lw*lh));
+      ok(lw*es*lh*es<=MAX_EXPORT_PX+1,'export scale keeps output area within MAX_EXPORT_PX'); }
   }catch(e){ f++; console.error('FAIL (exception)',e); }
   try{ if(stash!=null)localStorage.setItem('osrmap',stash); }catch(e){}   // tests autosave as they generate — put the real map back
   const o=stash?parseMap(stash):null; if(o){ loadMapObj(o); afterLoad(); }

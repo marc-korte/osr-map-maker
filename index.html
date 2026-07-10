@@ -77,7 +77,7 @@
   <div class="backdrop" id="backdrop"></div>
   <div class="canvaswrap"><div class="canvaspad"><canvas id="cv" width="1000" height="1320" role="img" aria-label="Map canvas. Editing happens with the pointer; see the help footer for keyboard shortcuts.">Interactive map canvas (requires a mouse or touch).</canvas></div></div>
 </main>
-<footer id="help"><b>Select/Move</b> drags symbols, names <i>and</i> rivers/roads/trails/borders (selected = gold); <kbd>R</kbd><kbd>H</kbd><kbd>V</kbd><kbd>I</kbd> transform, <kbd>Del</kbd> removes. Drag the map itself to pan. <b>Draw River/Road/Trail/Border</b> are freehand (drag); <b>Border edge</b> snaps to hex edges. <b>Snap to grid</b> aligns dungeon symbols. ¼-inch squares, export = 300 dpi. <kbd>Esc</kbd> cancels a stroke &amp; deselects, <kbd>Ctrl+Z</kbd> undo, <kbd>Ctrl+Y</kbd> redo, <kbd>Ctrl+S</kbd> save .json. <b>Pan</b> hold <kbd>Space</kbd> or drag empty space with <b>Select/Move</b> (middle-drag too). <b>Zoom</b> <kbd>+</kbd><kbd>−</kbd> or Ctrl+wheel (pinch on touch), <kbd>0</kbd> resets, <b>Fit</b> sizes to window. On touch, drag = draw, two fingers = pan &amp; zoom.</footer>
+<footer id="help"><b>Select/Move</b> drags symbols, names <i>and</i> rivers/roads/trails/borders (selected = gold); <kbd>R</kbd><kbd>H</kbd><kbd>V</kbd><kbd>I</kbd> transform, <kbd>Del</kbd> removes. Drag the map itself to pan. <b>Draw River/Road/Trail</b> are freehand (drag); the dungeon <b>Freehand Border</b> is freehand too, while the wilderness <b>Hex Border</b> snaps to hex edges. <b>Snap to grid</b> aligns dungeon symbols. ¼-inch squares, export = 300 dpi. <kbd>Esc</kbd> cancels a stroke &amp; deselects, <kbd>Ctrl+Z</kbd> undo, <kbd>Ctrl+Y</kbd> redo, <kbd>Ctrl+S</kbd> save .json. <b>Pan</b> hold <kbd>Space</kbd> or drag empty space with <b>Select/Move</b> (middle-drag too). <b>Zoom</b> <kbd>+</kbd><kbd>−</kbd> or Ctrl+wheel (pinch on touch), <kbd>0</kbd> resets, <b>Fit</b> sizes to window. On touch, drag = draw, two fingers = pan &amp; zoom.</footer>
 
 <script src="icons.js"></script>
 <script>
@@ -433,8 +433,8 @@ function buildTools(){
   const a=document.getElementById('tools'); a.innerHTML='';
   const h=document.createElement('h3'); h.textContent=(M.mode==='wild'?'Wilderness':'Dungeon')+' tools'; a.appendChild(h);
   const btns=M.mode==='wild'
-    ? [['water','Water (grey)'],['erasehex','Erase hex'],['site','Keyed site'],['select','Select/Move'],['drawriver','Draw River'],['drawroad','Draw Road'],['drawtrail','Draw Trail'],['borderedge','Border'],['eraseline','Erase line']]
-    : [['floor','Floor'],['rock','Rock'],['select','Select/Move'],['drawriver','River'],['drawroad','Road'],['drawtrail','Trail'],['drawborder','Border'],['key','Keyed #'],['label','Label'],['erase','Erase'],['eraseline','Erase line']];
+    ? [['water','Water (grey)'],['erasehex','Erase hex'],['site','Keyed site'],['select','Select/Move'],['drawriver','Draw River'],['drawroad','Draw Road'],['drawtrail','Draw Trail'],['borderedge','Hex Border'],['eraseline','Erase line']]
+    : [['floor','Floor'],['rock','Rock'],['select','Select/Move'],['drawriver','River'],['drawroad','Road'],['drawtrail','Trail'],['drawborder','Freehand Border'],['key','Keyed #'],['label','Label'],['erase','Erase'],['eraseline','Erase line']];
   for(const[id,lab]of btns){ const b=document.createElement('button'); b.className='tool'+(tool===id?' on':''); press(b,tool===id); b.textContent=lab; b.onclick=()=>{ tool=id; buildTools(); }; a.appendChild(b); }
   { const h3=document.createElement('h3'); h3.textContent=(M.mode==='dun'?'Generate options':'Generate'); a.appendChild(h3);
     { const w=document.createElement('label'); w.className='num'; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode('Seed'));   // reproducible generation; blank = random each time

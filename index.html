@@ -1066,9 +1066,34 @@ function runTests(){
       for(const k of RESV) ok(M.hex[k]==='Blank'||M.hex[k]===undefined,'wild reserve clear '+k);
       ok(M.sites.every(s=>s.c>=0&&s.c<M.cols&&s.r>=0&&s.r<M.rows),'sites in bounds');
       ok(M.drawsW.every(d=>d.pts.length>1),'wild strokes have 2+ pts'); }
+    const dunConnected=()=>{ const fl=[]; for(const k in M.cells) if(M.cells[k]==='floor') fl.push(k); if(!fl.length)return true;   // flood-fill floors orthogonally from one cell → whole floor set must be one component (implies stairs reachable)
+      const seen=new Set([fl[0]]), st=[fl[0].split(',').map(Number)];
+      while(st.length){ const[c,r]=st.pop(); for(const[dc,dr]of[[1,0],[-1,0],[0,1],[0,-1]]){ const nk=(c+dc)+','+(r+dr); if(M.cells[nk]==='floor'&&!seen.has(nk)){ seen.add(nk); st.push([c+dc,r+dr]); } } }
+      return seen.size===fl.length; };
     for(let i=0;i<10;i++){ setMode('dun'); genDun(); const RESV=dunReserve(layout());
       for(const k of RESV) ok(M.cells[k]!=='floor','dun reserve is rock '+k);
-      ok(M.syms.every(s=>typeof s.x==='number'&&typeof s.y==='number'),'dun syms have coords'); }
+      ok(M.syms.every(s=>typeof s.x==='number'&&typeof s.y==='number'),'dun syms have coords');
+      ok(dunConnected(),'dun floors form a single connected component');
+      let brd=false; for(const k in M.cells){ if(M.cells[k]!=='floor')continue; const[c,r]=k.split(',').map(Number); if(c===0||r===0||c===M.cols-1||r===M.rows-1){brd=true;break;} } ok(!brd,'no floor on the 1-cell border'); }
+    // seeded determinism — a fixed seed reproduces the map; a different seed diverges (the seed itself isn't in stateStr)
+    setMode('wild'); genWild('det-seed'); const w1=stateStr(); genWild('det-seed'); const w2=stateStr(); genWild('det-seed-2'); const w3=stateStr();
+    ok(w1===w2,'genWild deterministic for a fixed seed'); ok(w1!==w3,'genWild differs across seeds');
+    setMode('dun'); genDun('det-seed'); const dd1=stateStr(); genDun('det-seed'); const dd2=stateStr(); genDun('det-seed-2'); const dd3=stateStr();
+    ok(dd1===dd2,'genDun deterministic for a fixed seed'); ok(dd1!==dd3,'genDun differs across seeds');
+    // sub-min reserve skip: force 5×5 wild dims → too few playable cells → key overlays content instead of blanking generation
+    { setMode('wild'); const sc=M.cols,sr=M.rows,scw=M.colsW,srw=M.rowsW; M.cols=M.rows=M.colsW=M.rowsW=5; fitCanvas();
+      ok(legendReserveWild(layout()).size===0,'legendReserveWild returns empty Set on a sub-min map');
+      M.cols=sc;M.rows=sr;M.colsW=scw;M.rowsW=srw; fitCanvas(); }
+    // resize is a pure translation: a seeded stroke point shifts by exactly (dx,dy) and stays on its hex
+    { setMode('wild'); const svW=M.drawsW, svc=M.colsW, svr=M.rowsW; M.colsW=9;M.rowsW=12;M.cols=9;M.rows=12; fitCanvas();
+      const Lold=layout(), p0=hcenter(3,4,Lold), hx0=pickHex(p0[0],p0[1],Lold); M.drawsW=[{pts:[[p0[0],p0[1]]]}];
+      document.getElementById('cols').value=14; document.getElementById('rows').value=14; applyResize();
+      const Lnew=layout(), dx=Lnew.ox-Lold.ox, dy=Lnew.oy-Lold.oy, p1=M.drawsW[0].pts[0], hx1=pickHex(p1[0],p1[1],Lnew);
+      ok(Math.abs(p1[0]-(p0[0]+dx))<1e-6&&Math.abs(p1[1]-(p0[1]+dy))<1e-6,'resize shifts the stroke point by (dx,dy)');
+      ok(hx0&&hx1&&hx0[0]===hx1[0]&&hx0[1]===hx1[1],'stroke point maps to the same hex after resize');
+      M.drawsW=svW; M.colsW=svc;M.rowsW=svr;M.cols=svc;M.rows=svr; fitCanvas(); }
+    // a no-op transaction (nothing changed between begin/commit) leaves undo history untouched
+    { const ul=undoStack.length; beginChange(); commitChange(); ok(undoStack.length===ul,'no-op commitChange adds no undo entry'); }
   }catch(e){ f++; console.error('FAIL (exception)',e); }
   try{ if(stash!=null)localStorage.setItem('osrmap',stash); }catch(e){}   // tests autosave as they generate — put the real map back
   const o=stash?parseMap(stash):null; if(o){ loadMapObj(o); afterLoad(); }

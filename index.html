@@ -602,7 +602,7 @@ function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2){ pinching=false; p
 cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse'){hoverX=hoverY=null;render();} });
-window.addEventListener('keydown',e=>{ const typing=document.activeElement&&document.activeElement.tagName==='INPUT'; if(typing)return;   // first statement: Ctrl+Z/Y/S in a text field do native editing, not map actions
+window.addEventListener('keydown',e=>{ const typing=document.activeElement&&document.activeElement.tagName==='INPUT'; if(typing){ if(e.key==='Escape')document.activeElement.blur(); return; }   // in a field: Esc leaves the field (a 2nd Esc then deselects); other keys do native editing, not map actions
   if(e.key==='Escape'){curStroke=null;sel=-1;selHex=null;selDraw=-1;selLabel=-1;selSite=-1;dragging=null;buildTools();render();}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault(); if(e.shiftKey)redo(); else undo(); return;}   // toLowerCase: Shift makes e.key 'Z'
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo();return;}
@@ -919,7 +919,7 @@ function genWild(seedArg){
   placeSettlements(); placeFeatures(); buildRoads(); if(O.rivers!=='none')carveRivers(); nameWaters();
   M.sites=M.sites.filter(s=>!RES.has(s.c+','+s.r));   // safety: nothing labeled under the key
   render(); maybeFit(); save(); commitChange();
-  } finally { _rng=Math.random; }   // seeding must never leak into later non-generation randomness
+  } finally { _rng=Math.random; _pre=null; }   // seeding must never leak into later non-generation randomness; drop any open transaction so a throw can't leave a phantom pre-state for a later commit
 }
 function hexPath(a,b,g,cost){
   const key=(c,r)=>c+','+r, ak=key(a[0],a[1]), bk=key(b[0],b[1]);
@@ -983,15 +983,25 @@ function genDun(seedArg){
     for(const[a,b]of edges){ for(const[c,r]of dunPath(ctr(rooms[a]),ctr(rooms[b]),a,b)) M.cells[c+','+r]='floor'; } }
   function ensureConnected(){   // dunPath's [a,b] fallback can carve nothing → guarantee every room reaches the entrance with an L-tunnel
     const K=(c,r)=>c+','+r;
+    const hLeg=(c0,c1,row)=>{ const p=[]; let c=c0; while(c!==c1){ c+=c<c1?1:-1; p.push([c,row]); } return p; };   // cells c0→c1 along a row (start excluded, end included)
+    const vLeg=(r0,r1,col)=>{ const p=[]; let r=r0; while(r!==r1){ r+=r<r1?1:-1; p.push([col,r]); } return p; };
+    const legOK=pts=>pts.every(([c,r])=>!RES.has(K(c,r)));   // usable only if no cell lands on the reserved key/ruler footprint
     for(let guard=0; guard<rooms.length+2; guard++){
       const s=ctr(rooms[0]), seen=new Set([K(s[0],s[1])]), stack=[s];
       while(stack.length){ const[c,r]=stack.pop(); for(const[dc,dr]of DIRS){ const nc=c+dc,nr=r+dr,nk=K(nc,nr); if(!seen.has(nk)&&M.cells[nk]==='floor'){ seen.add(nk); stack.push([nc,nr]); } } }
       let bad=-1; for(let i=1;i<rooms.length;i++){ const p=ctr(rooms[i]); if(!seen.has(K(p[0],p[1]))){ bad=i; break; } }
       if(bad<0)return;
-      const from=ctr(rooms[bad]); let tc=from[0],tr=from[1],bd=1e18;
-      for(const k of seen){ const[c,r]=k.split(',').map(Number), d=(c-from[0])**2+(r-from[1])**2; if(d<bd){bd=d;tc=c;tr=r;} }
-      let c=from[0]; while(c!==tc){ c+=c<tc?1:-1; M.cells[K(c,from[1])]='floor'; }
-      let r=from[1]; while(r!==tr){ r+=r<tr?1:-1; M.cells[K(tc,r)]='floor'; } } }
+      const from=ctr(rooms[bad]);
+      // pick the nearest reached cell whose L-tunnel — either leg order — clears the reserve, then carve that path (never floor a RES cell)
+      let bestPath=null,bd=1e18;
+      for(const k of seen){ const[tc,tr]=k.split(',').map(Number), d=(tc-from[0])**2+(tr-from[1])**2; if(d>=bd)continue;
+        const pA=hLeg(from[0],tc,from[1]).concat(vLeg(from[1],tr,tc));   // horizontal then vertical (corner at tc,from[1])
+        const pB=vLeg(from[1],tr,from[0]).concat(hLeg(from[0],tc,tr));   // vertical then horizontal (corner at from[0],tr)
+        const use=legOK(pA)?pA:legOK(pB)?pB:null; if(!use)continue; bd=d; bestPath=use; }
+      if(bestPath){ for(const[c,r]of bestPath) M.cells[K(c,r)]='floor'; }
+      else { let tc=from[0],tr=from[1],b2=1e18;   // no reserve-free L-tunnel exists → carve toward the nearest cell but skip RES (room stays disconnected rather than floor the reserve)
+        for(const k of seen){ const[c,r]=k.split(',').map(Number), d=(c-from[0])**2+(r-from[1])**2; if(d<b2){b2=d;tc=c;tr=r;} }
+        for(const[c,r]of hLeg(from[0],tc,from[1]).concat(vLeg(from[1],tr,tc))) if(!RES.has(K(c,r))) M.cells[K(c,r)]='floor'; } } }
   // symbol placement on conflict-free cells — shared by the stairs + keys/features phases
   const occupied=new Set();
   const roomCells=m=>{ const o=[]; for(let r=m.y;r<m.y+m.h;r++)for(let c=m.x;c<m.x+m.w;c++) if(M.cells[c+','+r]==='floor') o.push([c,r]); return o; };
@@ -1038,7 +1048,7 @@ function genDun(seedArg){
   if(!placeRooms()){ render(); save(); commitChange(); return; }
   carveCorridors(); ensureConnected(); placeDoors(); placeStairs(); placeKeysAndFeatures(); addDeadEnds();
   render(); maybeFit(); save(); commitChange();
-  } finally { _rng=Math.random; }   // covers the early return above too — seeding never leaks past a generate
+  } finally { _rng=Math.random; _pre=null; }   // covers the early return above too — seeding never leaks past a generate; also drops any open transaction so a throw can't leave a phantom pre-state for a later commit
 }
 function doGenerate(){ if(!confirm('Generate a random '+(M.mode==='wild'?'wilderness':'dungeon')+'? This replaces the current map.'))return; (M.mode==='wild'?genWild:genDun)(); }
 
@@ -1112,8 +1122,8 @@ function boot(){
   if(params.has('gw')||params.has('gd')){   // dev sample-map links must not clobber the user's autosave: stash it, generate, restore
     let stash=null; try{ stash=localStorage.getItem('osrmap'); }catch(e){}
     const seed=params.get('seed');   // ?gw&seed=abc / ?gd&seed=abc reproduce a specific map
-    if(params.has('gw')){setMode('wild');genWild(seed);} else {setMode('dun');genDun(seed);}
-    try{ if(stash!=null)localStorage.setItem('osrmap',stash); else localStorage.removeItem('osrmap'); }catch(e){}
+    try{ if(params.has('gw')){setMode('wild');genWild(seed);} else {setMode('dun');genDun(seed);} }
+    finally{ try{ if(stash!=null)localStorage.setItem('osrmap',stash); else localStorage.removeItem('osrmap'); }catch(e){} }   // restore the user's autosave even if generation throws
   }
   if(params.has('dev'))window.MM=M;
   if(params.has('test'))runTests();

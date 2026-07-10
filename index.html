@@ -130,8 +130,11 @@ const SCHEMA_V=2;   // save-file schema version; absent v = v1 (everything shipp
 const M={ v:SCHEMA_V, mode:'wild', title:'THE HUSH', titleW:'THE HUSH', titleD:'THE DUNGEON',
   cols:9, rows:12, colsW:9, rowsW:12, colsD:28, rowsD:36, view:'gm',
   layers:[{id:'terrain',label:'Terrain',vis:true,gm:false},{id:'lines',label:'Lines',vis:true,gm:false},{id:'symbols',label:'Symbols',vis:true,gm:false},{id:'keys',label:'Keys',vis:true,gm:false},{id:'text',label:'Text',vis:true,gm:false}],
-  hex:{}, sites:[], roads:[], cells:{}, syms:[], labels:[], drawsW:[], drawsD:[], curStyle:'road', gridBg:true, snap:true, milesPerHex:1, feetPerSquare:10, seedW:'', seedD:'' };
+  hex:{}, sites:[], roads:[], cells:{}, syms:[], labels:[], drawsW:[], drawsD:[], gridBg:true, snap:true, milesPerHex:1, feetPerSquare:10, seedW:'', seedD:'' };
 const M0=JSON.stringify(M);   // pristine defaults — loads fill/reset missing fields from this
+// generate-option defaults, shared by buildTools (which seeds the <select>s) and the generators
+const WILD_OPTS_DEF={water:'normal',terrain:'normal',settlements:'some',features:'some',rivers:'some'};
+const DUN_OPTS_DEF={density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'};
 let tool='terrain', curIcon='Forest', filter='';
 let stampT={rot:0,fx:false,fy:false,inv:false};   // transform for new/selected stamps
 let sel=-1;                                        // index of selected dungeon symbol
@@ -150,9 +153,8 @@ function tT(){ if(M.mode==='dun'){ return (sel>=0&&M.syms[sel]&&M.syms[sel].icon
 function eraseNearestStroke(px,py){ const a=curDraws(); let bi=-1,bd=ERASE_STROKE2; a.forEach((d,i)=>{for(const p of d.pts){const dd=(p[0]-px)**2+(p[1]-py)**2; if(dd<bd){bd=dd;bi=i;}}}); if(bi>=0)a.splice(bi,1); }
 const undoStack=[], redoStack=[];
 function stateStr(){ return JSON.stringify({mode:M.mode,cols:M.cols,rows:M.rows,colsW:M.colsW,rowsW:M.rowsW,colsD:M.colsD,rowsD:M.rowsD,title:M.title,titleW:M.titleW,titleD:M.titleD,milesPerHex:M.milesPerHex,feetPerSquare:M.feetPerSquare,hex:M.hex,sites:M.sites,roads:M.roads,cells:M.cells,syms:M.syms,labels:M.labels,drawsW:M.drawsW,drawsD:M.drawsD}); }
-function snap(){ undoStack.push(stateStr()); if(undoStack.length>UNDO_MAX)undoStack.shift(); redoStack.length=0; }   // any new action invalidates redo
 let _pre=null;
-function beginChange(){ _pre=stateStr(); }   // capture pre-state; commitChange pushes it only if something actually changed
+function beginChange(){ if(_pre===null)_pre=stateStr(); }   // capture pre-state ONCE per transaction (null-guard: repeated per-move calls are no-ops); commitChange pushes it only if something actually changed
 function commitChange(){ if(_pre===null)return; if(stateStr()!==_pre){ undoStack.push(_pre); if(undoStack.length>UNDO_MAX)undoStack.shift(); redoStack.length=0; } _pre=null; }
 function syncDimsDOM(){ document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows; document.getElementById('title').value=M.title;
   document.getElementById('scale').value=(M.mode==='wild'?(M.milesPerHex||1):(M.feetPerSquare||10)); }
@@ -160,7 +162,7 @@ function restoreState(s){ const o=JSON.parse(s), switched=o.mode!==M.mode; Objec
   sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; dragging=null; curStroke=null; borderLast=null;   // stale selection/drag indices would delete the wrong item post-restore
   if(switched)setMode(M.mode); else { syncDimsDOM(); buildTools(); render(); } save(); }
 function undo(){ const s=undoStack.pop(); if(!s)return; redoStack.push(stateStr()); if(redoStack.length>UNDO_MAX)redoStack.shift(); restoreState(s); }
-function redo(){ const s=redoStack.pop(); if(!s)return; undoStack.push(stateStr()); restoreState(s); }   // direct push, not snap() → keeps redo history intact
+function redo(){ const s=redoStack.pop(); if(!s)return; undoStack.push(stateStr()); restoreState(s); }   // direct push (not a fresh transaction) → keeps redo history intact
 function sync(){ render(); save(); buildTools(); }
 function nearestIdx(a,px,py,bd,pos){ let bi=-1; a.forEach((o,i)=>{ const p=pos(o), d=(p[0]-px)**2+(p[1]-py)**2; if(d<bd){bd=d;bi=i;} }); return bi; }   // nearest item within a SQUARED radius
 function dragDraw(px,py){ const d=curDraws()[dragging.i]; if(d){ const dx=px-dragPrev.x,dy=py-dragPrev.y; for(const p of d.pts){p[0]+=dx;p[1]+=dy;} } dragPrev={x:px,y:py}; }   // translate the grabbed stroke
@@ -414,7 +416,8 @@ function drawDun(g,W,H){
 // reserve is stable regardless of which symbols the generator ends up placing.
 function legendAnchorDun(L){ const x1=L.ox+M.cols*L.cell, y1=L.oy+M.rows*L.cell; return {x:x1-14-LEG_W, y:y1-14-LEG_H}; }
 function dunRulerLabel(){ return '1 square = '+fmtScale(M.feetPerSquare||10)+' ft'; }
-function dunRulerW(){ ctx.save(); ctx.font='italic 13px Georgia,serif'; const w=ctx.measureText(dunRulerLabel()).width; ctx.restore(); return Math.max(120,w+16); }
+let _rw=null,_rwKey;   // cache the measured scale-note width (measureText per render is wasteful); the label depends only on feetPerSquare
+function dunRulerW(){ const key=M.feetPerSquare; if(_rw!==null&&_rwKey===key)return _rw; ctx.save(); ctx.font='italic 13px Georgia,serif'; const w=ctx.measureText(dunRulerLabel()).width; ctx.restore(); _rwKey=key; _rw=Math.max(120,w+16); return _rw; }
 function rulerRectDun(L){ const y1=L.oy+M.rows*L.cell; return {x:L.ox+14, y:y1-40, w:dunRulerW(), h:24}; }   // scale-note chip footprint (bottom-left), reserved as rock at generation
 function dunReserve(L){ const a=legendAnchorDun(L), rb=rulerRectDun(L), boxes=[[a.x,a.y,LEG_W,LEG_H],[rb.x,rb.y,rb.w,rb.h]], set=new Set();
   for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const cx=L.ox+c*L.cell, cy=L.oy+r*L.cell;
@@ -441,8 +444,8 @@ function buildTools(){
       const si=document.createElement('input'); si.type='text'; si.id=(M.mode==='dun'?'seedD':'seedW'); si.placeholder='blank = random'; si.value=(M.mode==='dun'?M.seedD:M.seedW)||''; si.style.cssText='flex:1;min-width:0;';
       si.onchange=()=>{ const v=si.value.trim(); if(M.mode==='dun')M.seedD=v; else M.seedW=v; save(); }; w.appendChild(si); a.appendChild(w); }
     const OPTS = M.mode==='dun'
-      ? (M.dunOpts=Object.assign({density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'},M.dunOpts||{}))   // donjon-style generate options
-      : (M.wildOpts=Object.assign({water:'normal',terrain:'normal',settlements:'some',features:'some',rivers:'some'},M.wildOpts||{}));
+      ? (M.dunOpts=Object.assign({},DUN_OPTS_DEF,M.dunOpts||{}))   // donjon-style generate options
+      : (M.wildOpts=Object.assign({},WILD_OPTS_DEF,M.wildOpts||{}));
     const mkSel=(key,label,vals)=>{ const w=document.createElement('label'); w.className='num'; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode(label));   // NB: named mkSel — a local `sel` would shadow the selected-symbol index
       const s=document.createElement('select'); s.style.cssText='flex:1;background:#111;color:#eee;border:1px solid #555;border-radius:4px;padding:3px;font-size:12px;';
       for(const[v,tt]of vals){ const o=document.createElement('option'); o.value=v; o.textContent=tt; if(OPTS[key]===v)o.selected=true; s.appendChild(o); }
@@ -512,13 +515,13 @@ function setMode(m){ M.mode=m; sel=-1; selHex=null; selDraw=-1; selLabel=-1; sel
   const tw=document.getElementById('tabWild'),td=document.getElementById('tabDun'); tw.classList.toggle('on',m==='wild'); td.classList.toggle('on',m==='dun'); press(tw,m==='wild'); press(td,m==='dun');
   tool=(m==='wild'?'terrain':'stamp'); curIcon=(m==='wild'?'Forest':(ICONS.dungeon[0]||{}).n||'Door1x1');
   M.cols=(m==='wild'?M.colsW:M.colsD); M.rows=(m==='wild'?M.rowsW:M.rowsD); filter='';   // filter is dungeon-only; drop it so a stale term doesn't hide the wild palette
+  M.title=(m==='wild'?M.titleW:M.titleD);
   const mn=(m==='wild'?WILD_MIN:DUN_MIN); document.getElementById('cols').min=mn.c; document.getElementById('rows').min=mn.r;
-  document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows;
-  document.getElementById('title').value=(m==='wild'?M.titleW:M.titleD); M.title=document.getElementById('title').value;
+  syncDimsDOM();   // cols/rows/title/scale .value writes (mode already set → scale reads the right unit)
   const sc=document.getElementById('scale'), sl=document.getElementById('scaleLbl');
-  if(m==='wild'){ sl.firstChild.textContent='miles/hex '; sc.value=(M.milesPerHex||1); sc.min=0.1; sc.step=0.5; }
-  else { sl.firstChild.textContent='ft/square '; sc.value=(M.feetPerSquare||10); sc.min=1; sc.step=1; }
-  buildTools(); render(); }
+  if(m==='wild'){ sl.firstChild.textContent='miles/hex '; sc.min=0.1; sc.step=0.5; }
+  else { sl.firstChild.textContent='ft/square '; sc.min=1; sc.step=1; }
+  buildTools(); render(); save(); }   // persist the mode switch (guarded by save()'s quota try/catch)
 
 // ---------- interaction ----------
 function evpos(e){ const r=cv.getBoundingClientRect(); return [panX+(e.clientX-r.left)/zoom, panY+(e.clientY-r.top)/zoom]; }
@@ -526,17 +529,19 @@ let painting=false;
 // tool handlers, one small function each — fn(px,py,first,L). HANDLERS.any applies in both modes;
 // tools in ONCE fire on pointerdown only, everything else repeats while dragging.
 const STROKE_KIND={drawriver:'river',drawroad:'road',drawtrail:'trail',drawborder:'border'};
-function toolStroke(px,py,first){ if(first){ curStroke={pts:[[px,py]],kind:STROKE_KIND[tool]}; }
+function toolStroke(px,py,first){ if(first){ beginChange(); curStroke={pts:[[px,py]],kind:STROKE_KIND[tool]}; }   // capture pre-stroke state; commitStroke pushes the finished stroke before endPtr's commitChange
   else if(curStroke){ const p=curStroke.pts[curStroke.pts.length-1]; if((p[0]-px)**2+(p[1]-py)**2>9) curStroke.pts.push([px,py]); } }
-function toolEraseLine(px,py){ eraseNearestStroke(px,py); }
-function toolBorderEdge(px,py,first,L){ const e=nearestEdge(px,py,L); if(!e)return; if(first)borderLast=null;
+function toolEraseLine(px,py){ beginChange(); eraseNearestStroke(px,py); }
+function toolBorderEdge(px,py,first,L){ const e=nearestEdge(px,py,L); if(!e)return; beginChange(); if(first)borderLast=null;
   if(borderLast!==e.key){ borderLast=e.key; const arr=curDraws(); if(!arr.some(d=>d.edgeKey===e.key)) arr.push({pts:[e.a,e.b],kind:'border',edgeKey:e.key}); } }
-function toolPaintHex(px,py,first,L){ const hx=pickHex(px,py,L); if(!hx)return; const k=hx[0]+','+hx[1];
+function toolPaintHex(px,py,first,L){ const hx=pickHex(px,py,L); if(!hx)return; beginChange(); const k=hx[0]+','+hx[1];
   if(tool==='erasehex')delete M.hex[k]; else if(tool==='water')M.hex[k]='Water'; else M.hex[k]={n:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}; }
-function toolPaintCell(px,py,first,L){ const c=pickCell(px,py,L); if(!c)return;
+function toolPaintCell(px,py,first,L){ const c=pickCell(px,py,L); if(!c)return; beginChange();
   if(tool==='floor')M.cells[c[0]+','+c[1]]='floor';
-  else{ delete M.cells[c[0]+','+c[1]]; const same=o=>{ const oc=pickCell(o.x,o.y,L); return oc&&oc[0]===c[0]&&oc[1]===c[1]; };   // Rock clears the cell fully, incl. any symbol/label on it
-    M.syms=M.syms.filter(s=>!same(s)); M.labels=M.labels.filter(l=>!same(l)); sel=-1; } }
+  else{ delete M.cells[c[0]+','+c[1]];   // Rock clears the cell fully, incl. any symbol/label on it
+    if(M.syms.length||M.labels.length){ const same=o=>{ const oc=pickCell(o.x,o.y,L); return oc&&oc[0]===c[0]&&oc[1]===c[1]; };
+      M.syms=M.syms.filter(s=>!same(s)); M.labels=M.labels.filter(l=>!same(l)); }
+    sel=-1; selLabel=-1; selDraw=-1; } }   // drop any stale selection now that a symbol/label under the cell may be gone
 function toolSelectWild(px,py,first,L){
   if(first){ selHex=null; selDraw=-1; selSite=-1; dragging=null; dragPrev={x:px,y:py};
     const bi=nearestIdx(M.sites,px,py,PICK_SITE2,s=>hcenter(s.c,s.r,L));
@@ -544,7 +549,8 @@ function toolSelectWild(px,py,first,L){
     else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};}
       else { const hx=pickHex(px,py,L); if(hx&&M.hex[hx[0]+','+hx[1]])selHex=hx[0]+','+hx[1]; } }   // select a hex (for Del/G) but DON'T grab it → empty/terrain drag falls through to pan, like the dungeon
     buildTools(); }
-  else if(dragging){ if(dragging.k==='draw')dragDraw(px,py); else { const hx=pickHex(px,py,L); if(hx&&dragging.k==='site'){M.sites[dragging.i].c=hx[0];M.sites[dragging.i].r=hx[1];} } } }
+  else if(dragging){ beginChange();   // lazy: capture only once a real drag-move mutates — a bare selection click serializes nothing
+    if(dragging.k==='draw')dragDraw(px,py); else { const hx=pickHex(px,py,L); if(hx&&dragging.k==='site'){M.sites[dragging.i].c=hx[0];M.sites[dragging.i].r=hx[1];} } } }
 function toolSelectDun(px,py,first,L){
   if(first){ sel=-1; selDraw=-1; selLabel=-1; dragging=null; dragPrev={x:px,y:py};
     const bi=nearestIdx(M.syms,px,py,PICK_SYM2,s=>[s.x,s.y]);
@@ -552,15 +558,16 @@ function toolSelectDun(px,py,first,L){
     else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};}
       else { const li=nearestIdx(M.labels,px,py,PICK_SYM2,l=>[l.x,l.y]); if(li>=0){selLabel=li;dragging={k:'l',i:li};} } }
     buildTools(); }
-  else if(dragging){ if(dragging.k==='draw')dragDraw(px,py); else if(dragging.k==='s'){ const o=M.syms[dragging.i]; if(o){const[sx,sy]=snapPt(px,py,L); o.x=sx; o.y=sy;} } else { const o=M.labels[dragging.i]; if(o){o.x=px;o.y=py;} } } }
+  else if(dragging){ beginChange();   // lazy: capture only once a real drag-move mutates — a bare selection click serializes nothing
+    if(dragging.k==='draw')dragDraw(px,py); else if(dragging.k==='s'){ const o=M.syms[dragging.i]; if(o){const[sx,sy]=snapPt(px,py,L); o.x=sx; o.y=sy;} } else { const o=M.labels[dragging.i]; if(o){o.x=px;o.y=py;} } } }
 function toolSite(px,py,first,L){ const hx=pickHex(px,py,L); if(!hx)return; const ex=M.sites.find(s=>s.c===hx[0]&&s.r===hx[1]);
   const label=prompt(ex&&ex.kind==='place'?'Place name:':'Site label (e.g. Hush Road):', ex?ex.label:'');
-  if(label!==null){ M.sites=M.sites.filter(s=>!(s.c===hx[0]&&s.r===hx[1])); M.sites.push({c:hx[0],r:hx[1],label:label||'',...(ex&&ex.kind==='place'?{kind:'place'}:{})}); } }
-function toolLabel(px,py){ const t=prompt('Label text:',''); if(t)M.labels.push({x:px,y:py,text:t}); }
-function toolKey(px,py,first,L){ if(!pickCell(px,py,L))return; const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,type:'key'}); sel=M.syms.length-1; buildTools(); }
-function toolEraseSym(px,py){ const bi=nearestIdx(M.syms,px,py,PICK_SYM2,s=>[s.x,s.y]); if(bi>=0)M.syms.splice(bi,1);
+  if(label!==null){ beginChange(); M.sites=M.sites.filter(s=>!(s.c===hx[0]&&s.r===hx[1])); M.sites.push({c:hx[0],r:hx[1],label:label||'',...(ex&&ex.kind==='place'?{kind:'place'}:{})}); } }
+function toolLabel(px,py){ const t=prompt('Label text:',''); if(t){ beginChange(); M.labels.push({x:px,y:py,text:t}); } }
+function toolKey(px,py,first,L){ if(!pickCell(px,py,L))return; beginChange(); const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,type:'key'}); sel=M.syms.length-1; buildTools(); }
+function toolEraseSym(px,py){ beginChange(); const bi=nearestIdx(M.syms,px,py,PICK_SYM2,s=>[s.x,s.y]); if(bi>=0)M.syms.splice(bi,1);
   else{ let li=-1; M.labels.forEach((l,i)=>{if((l.x-px)**2+(l.y-py)**2<PICK_SYM2)li=i;}); if(li>=0)M.labels.splice(li,1); } sel=-1; buildTools(); }
-function toolStamp(px,py,first,L){ if(!pickCell(px,py,L))return; const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,icon:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}); sel=M.syms.length-1; buildTools(); }
+function toolStamp(px,py,first,L){ if(!pickCell(px,py,L))return; beginChange(); const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,icon:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}); sel=M.syms.length-1; buildTools(); }
 const HANDLERS={
   any:{drawriver:toolStroke,drawroad:toolStroke,drawtrail:toolStroke,drawborder:toolStroke,eraseline:toolEraseLine,borderedge:toolBorderEdge},
   wild:{terrain:toolPaintHex,water:toolPaintHex,erasehex:toolPaintHex,select:toolSelectWild,site:toolSite},
@@ -568,13 +575,12 @@ const HANDLERS={
 const ONCE=new Set(['site','label','key','erase','stamp','eraseline']);   // pointerdown-only tools (the old `else if(!first)return` gate)
 function apply(px,py,first){
   if(ONCE.has(tool)&&!first)return;
-  if(first)beginChange();   // pointerdown opens a transaction; endPtr's commitChange discards it if nothing changed
-  const h=HANDLERS.any[tool]||(HANDLERS[M.mode]||{})[tool];
+  const h=HANDLERS.any[tool]||(HANDLERS[M.mode]||{})[tool];   // each mutating handler opens its own transaction (beginChange) at the point it first mutates; endPtr commits it (no-op if nothing changed)
   if(h)h(px,py,first,layout());
   render();
 }
 let dragging=null;
-function applyT(kind){ beginChange(); const t=tT(); if(kind==='rot')t.rot=((t.rot||0)+90)%360; else t[kind]=!t[kind]; sync(); commitChange(); }
+function applyT(kind){ if(ptrs.size>0)return; beginChange(); const t=tT(); if(kind==='rot')t.rot=((t.rot||0)+90)%360; else t[kind]=!t[kind]; sync(); commitChange(); }   // skip mid-gesture: a keyboard transform during a pointer drag would corrupt the open transaction
 // Pointer Events unify mouse / pen / touch. Two simultaneous pointers = pinch-zoom + pan.
 const ptrs=new Map(); let pinching=false, pinchDist=0, pinchMid=null, panning=false, panLast=null, spaceHeld=false;
 function ptrArr(){ return [...ptrs.values()]; }
@@ -602,7 +608,8 @@ function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2){ pinching=false; p
 cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse'){hoverX=hoverY=null;render();} });
-window.addEventListener('keydown',e=>{ const typing=document.activeElement&&document.activeElement.tagName==='INPUT'; if(typing){ if(e.key==='Escape')document.activeElement.blur(); return; }   // in a field: Esc leaves the field (a 2nd Esc then deselects); other keys do native editing, not map actions
+window.addEventListener('keydown',e=>{ const typing=document.activeElement&&document.activeElement.tagName==='INPUT'; if(typing){ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();document.getElementById('save').onclick();return;}   // Ctrl+S saves .json even while a field is focused (not the browser save-page dialog)
+    if(e.key==='Escape')document.activeElement.blur(); return; }   // in a field: Esc leaves the field (a 2nd Esc then deselects); other keys do native editing, not map actions
   if(e.key==='Escape'){curStroke=null;sel=-1;selHex=null;selDraw=-1;selLabel=-1;selSite=-1;dragging=null;buildTools();render();}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault(); if(e.shiftKey)redo(); else undo(); return;}   // toLowerCase: Shift makes e.key 'Z'
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo();return;}
@@ -610,8 +617,8 @@ window.addEventListener('keydown',e=>{ const typing=document.activeElement&&docu
   if(e.key===' '||e.code==='Space'){ if(!spaceHeld){spaceHeld=true;setCursor();} e.preventDefault(); return; }   // hold Space = pan (hand)
   const k=e.key.toLowerCase();
   if(k==='r')applyT('rot'); else if(k==='h')applyT('fx'); else if(k==='v')applyT('fy'); else if(k==='i')applyT('inv');
-  else if(k==='g'){ const s=selection(); if(s){ beginChange(); s.o.gm=!s.o.gm; sync(); commitChange(); } }
-  else if(k==='delete'||k==='backspace'){ const s=selection(); if(s){ beginChange(); s.del(); sync(); commitChange(); } } });
+  else if(k==='g'){ if(ptrs.size>0)return; const s=selection(); if(s){ beginChange(); s.o.gm=!s.o.gm; sync(); commitChange(); } }   // skip mid-gesture (would corrupt the drag's open transaction)
+  else if(k==='delete'||k==='backspace'){ if(ptrs.size>0)return; const s=selection(); if(s){ beginChange(); s.del(); sync(); commitChange(); } } });
 window.addEventListener('keyup',e=>{ if(e.key===' '||e.code==='Space'){ spaceHeld=false; if(!panning)setCursor(); } });
 
 // ---------- persistence + export ----------
@@ -642,12 +649,12 @@ function migrateMap(o){ o.v=SCHEMA_V; const D=JSON.parse(M0); let dropped=0;   /
   o.syms=filt(o.syms,s=>s&&num(s.x)&&num(s.y)); o.labels=filt(o.labels,l=>l&&num(l.x)&&num(l.y)); o.sites=filt(o.sites,s=>s&&num(s.c)&&num(s.r));
   for(const k in o.hex){ const h=o.hex[k]; if(!(typeof h==='string'||(h&&typeof h==='object'&&typeof h.n==='string'))){ delete o.hex[k]; dropped++; } }   // legendWild reads t.n on non-strings
   return dropped; }
-const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rowsW','colsD','rowsD','view','layers','hex','sites','roads','cells','syms','labels','drawsW','drawsD','curStyle','gridBg','snap','milesPerHex','feetPerSquare','dunOpts','wildOpts','seedW','seedD'];
+const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rowsW','colsD','rowsD','view','layers','hex','sites','roads','cells','syms','labels','drawsW','drawsD','gridBg','snap','milesPerHex','feetPerSquare','dunOpts','wildOpts','seedW','seedD'];
 function applyMap(o){ const D=JSON.parse(M0); for(const k of MAP_KEYS) M[k]=(o[k]!==undefined)?o[k]:D[k]; }   // whitelist: keys absent in the save reset to defaults (no leftovers from the previous map)
 function loadMapObj(o){ if(o.v>SCHEMA_V) showBanner('This map was saved by a newer version of OSR Map Maker — loading anyway.');
   const dropped=migrateMap(o); applyMap(o);
   if(dropped) showBanner(dropped+' damaged item'+(dropped>1?'s were':' was')+' removed while loading this map.'); return dropped; }
-function afterLoad(){ document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows; setMode(M.mode||'wild'); }
+function afterLoad(){ document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows; setMode(M.mode||'wild'); save(); }   // persist the loaded map (slot / .json loads had no save() after commitRoad was removed)
 function parseMap(s){ try{ const o=JSON.parse(s); return validateMap(o)?null:o; }catch(e){ return null; } }
 function loadLS(){
   let raw=null, usedBackup=false;
@@ -682,8 +689,9 @@ function slotRename(name){ let nn=prompt('Rename “'+name+'” to:',name); if(n
   try{ const raw=localStorage.getItem(SLOT_PRE+name); if(raw==null)return; if(slotWrite(nn,raw))localStorage.removeItem(SLOT_PRE+name); }catch(e){}
   buildTools(); }
 function slotDelete(name){ if(!confirm('Delete saved map “'+name+'”?'))return; try{ localStorage.removeItem(SLOT_PRE+name); }catch(e){} buildTools(); }
-document.getElementById('title').addEventListener('input',()=>{readTitle();render();});
-document.getElementById('scale').addEventListener('input',e=>{ beginChange(); const v=Math.max(0.01,+e.target.value||0); if(M.mode==='wild')M.milesPerHex=v; else M.feetPerSquare=v; render(); save(); commitChange(); });
+document.getElementById('title').addEventListener('input',()=>{ beginChange(); readTitle(); render(); });   // null-guarded beginChange captures the pre-edit title on the first keystroke; live render each key
+document.getElementById('title').addEventListener('change',()=>{ commitChange(); });   // blur/Enter ends the editing session → one undo step for the whole rename
+document.getElementById('scale').addEventListener('change',e=>{ beginChange(); const v=Math.max(0.01,+e.target.value||0); if(M.mode==='wild')M.milesPerHex=v; else M.feetPerSquare=v; render(); save(); commitChange(); });   // 'change' (commit), not 'input', so one undo step per scale edit — not per digit
 document.getElementById('tabWild').onclick=()=>setMode('wild');
 document.getElementById('tabDun').onclick=()=>setMode('dun');
 document.getElementById('undo').onclick=undo;
@@ -809,12 +817,14 @@ function roadRoute(path,L){
   return simplifyDP(pts, L.size*0.5);                           // collapse straight runs of hexes into single segments
 }
 function genWild(seedArg){
-  const seed=resolveSeed(seedArg||M.seedW); seedRng(seed); M.seedW=seed; { const sf=document.getElementById('seedW'); if(sf)sf.value=seed; }   // seed: arg → field/M → freshly minted
+  const userSeed=(seedArg!=null)?String(seedArg):M.seedW; const seed=resolveSeed(userSeed); seedRng(seed);   // resolution reads M.seedW (user intent), NOT the field
+  if(seedArg!=null)M.seedW=userSeed;   // only seedArg / user-entered (field onchange) seeds persist — a minted (blank) seed must NOT stick, or argless Generate would repeat the same map
+  { const sf=document.getElementById('seedW'); if(sf)sf.value=seed; }   // always show the resolved seed so the user can copy/reproduce it
   try{
   beginChange(); M.hex={}; M.sites=[]; M.roads=[]; M.drawsW=[]; selHex=null;
   M.title=M.titleW=genRegionName(); { const ti=document.getElementById('title'); if(ti)ti.value=M.title; }   // fresh region name each generate
   const cols=M.cols, rows=M.rows, L=layout(), RES=legendReserveWild(L);   // key footprint kept content-free (ruler lives in the bottom margin)
-  const O=Object.assign({water:'normal',terrain:'normal',settlements:'some',features:'some',rivers:'some'},M.wildOpts||{});   // generate options
+  const O=Object.assign({},WILD_OPTS_DEF,M.wildOpts||{});   // generate options
   const waterF={dry:0,normal:1,wet:2,coastal:2.5}[O.water], passF={smooth:3,normal:2,rugged:1}[O.terrain], cntF={few:0.5,some:1,many:1.8}, featCap={few:2,some:4,many:7}[O.features];
   const g={}, settle=[];   // working terrain grid + settlement hexes, shared across the phases below
 
@@ -935,12 +945,14 @@ function hexPath(a,b,g,cost){
 }
 
 function genDun(seedArg){
-  const seed=resolveSeed(seedArg||M.seedD); seedRng(seed); M.seedD=seed; { const sf=document.getElementById('seedD'); if(sf)sf.value=seed; }   // seed: arg → field/M → freshly minted
+  const userSeed=(seedArg!=null)?String(seedArg):M.seedD; const seed=resolveSeed(userSeed); seedRng(seed);   // resolution reads M.seedD (user intent), NOT the field
+  if(seedArg!=null)M.seedD=userSeed;   // only seedArg / user-entered (field onchange) seeds persist — a minted (blank) seed must NOT stick, or argless Generate would repeat the same map
+  { const sf=document.getElementById('seedD'); if(sf)sf.value=seed; }   // always show the resolved seed so the user can copy/reproduce it
   try{
   beginChange(); M.cells={}; M.syms=[]; M.labels=[]; M.drawsD=[]; sel=-1; selDraw=-1; selLabel=-1;
   const cols=M.cols, rows=M.rows, L=layout(), cc=(c,r)=>[L.ox+(c+0.5)*L.cell,L.oy+(r+0.5)*L.cell];
   const RES=dunReserve(L), roomHitsRes=(x,y,w,h)=>{ for(let r=y;r<y+h;r++)for(let c=x;c<x+w;c++)if(RES.has(c+','+r))return true; return false; };   // key + ruler footprints kept as rock
-  const O=Object.assign({density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'},M.dunOpts||{});
+  const O=Object.assign({},DUN_OPTS_DEF,M.dunOpts||{});
   const CPR={sparse:200,normal:110,dense:72,packed:48}[O.density]||110;            // cells per room → room count scales with grid area (fills large maps)
   const RZ={small:[2,3],medium:[2,5],large:[3,6]}[O.roomSize]||[2,5];
   const rooms=[], nroom=Math.max(4,Math.min(140,Math.round(cols*rows/CPR)));
@@ -1090,6 +1102,9 @@ function runTests(){
     ok(w1===w2,'genWild deterministic for a fixed seed'); ok(w1!==w3,'genWild differs across seeds');
     setMode('dun'); genDun('det-seed'); const dd1=stateStr(); genDun('det-seed'); const dd2=stateStr(); genDun('det-seed-2'); const dd3=stateStr();
     ok(dd1===dd2,'genDun deterministic for a fixed seed'); ok(dd1!==dd3,'genDun differs across seeds');
+    // argless freshness — a blank seed mints a fresh map on every Generate (minted seeds must not persist into M.seedW/M.seedD)
+    setMode('wild'); M.seedW=''; genWild(); const wf1=stateStr(); genWild(); ok(stateStr()!==wf1&&M.seedW==='','genWild argless differs each run and leaves seedW blank');
+    setMode('dun'); M.seedD=''; genDun(); const df1=stateStr(); genDun(); ok(stateStr()!==df1&&M.seedD==='','genDun argless differs each run and leaves seedD blank');
     // sub-min reserve skip: force 5×5 wild dims → too few playable cells → key overlays content instead of blanking generation
     { setMode('wild'); const sc=M.cols,sr=M.rows,scw=M.colsW,srw=M.rowsW; M.cols=M.rows=M.colsW=M.rowsW=5; fitCanvas();
       ok(legendReserveWild(layout()).size===0,'legendReserveWild returns empty Set on a sub-min map');

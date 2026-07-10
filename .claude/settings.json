@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(node --check /private/tmp/claude-502/-Users-marckorte-projects-osr-map-maker/49a9ba6d-c3dd-4b46-93d6-5481f308927d/scratchpad/check.js)"
     ]
   }
 }

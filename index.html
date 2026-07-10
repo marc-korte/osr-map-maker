@@ -148,10 +148,15 @@ function tT(){ if(M.mode==='dun'){ return (sel>=0&&M.syms[sel]&&M.syms[sel].icon
   if(selHex&&M.hex[selHex]){ let h=M.hex[selHex]; if(typeof h==='string'){h={n:h,rot:0,fx:false,fy:false,inv:false};M.hex[selHex]=h;} return h; } return stampT; }
 function eraseNearestStroke(px,py){ const a=curDraws(); let bi=-1,bd=ERASE_STROKE2; a.forEach((d,i)=>{for(const p of d.pts){const dd=(p[0]-px)**2+(p[1]-py)**2; if(dd<bd){bd=dd;bi=i;}}}); if(bi>=0)a.splice(bi,1); }
 const undoStack=[], redoStack=[];
-function stateStr(){ return JSON.stringify({hex:M.hex,sites:M.sites,roads:M.roads,cells:M.cells,syms:M.syms,labels:M.labels,drawsW:M.drawsW,drawsD:M.drawsD}); }
+function stateStr(){ return JSON.stringify({mode:M.mode,cols:M.cols,rows:M.rows,colsW:M.colsW,rowsW:M.rowsW,colsD:M.colsD,rowsD:M.rowsD,title:M.title,titleW:M.titleW,titleD:M.titleD,milesPerHex:M.milesPerHex,feetPerSquare:M.feetPerSquare,hex:M.hex,sites:M.sites,roads:M.roads,cells:M.cells,syms:M.syms,labels:M.labels,drawsW:M.drawsW,drawsD:M.drawsD}); }
 function snap(){ undoStack.push(stateStr()); if(undoStack.length>UNDO_MAX)undoStack.shift(); redoStack.length=0; }   // any new action invalidates redo
-function undo(){ const s=undoStack.pop(); if(!s)return; redoStack.push(stateStr()); if(redoStack.length>UNDO_MAX)redoStack.shift(); Object.assign(M,JSON.parse(s)); render(); save(); }
-function redo(){ const s=redoStack.pop(); if(!s)return; undoStack.push(stateStr()); Object.assign(M,JSON.parse(s)); render(); save(); }   // direct push, not snap() → keeps redo history intact
+function syncDimsDOM(){ document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows; document.getElementById('title').value=M.title;
+  document.getElementById('scale').value=(M.mode==='wild'?(M.milesPerHex||1):(M.feetPerSquare||10)); }
+function restoreState(s){ const o=JSON.parse(s), switched=o.mode!==M.mode; Object.assign(M,o);
+  sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; dragging=null; curStroke=null; borderLast=null;   // stale selection/drag indices would delete the wrong item post-restore
+  if(switched)setMode(M.mode); else { syncDimsDOM(); buildTools(); render(); } save(); }
+function undo(){ const s=undoStack.pop(); if(!s)return; redoStack.push(stateStr()); if(redoStack.length>UNDO_MAX)redoStack.shift(); restoreState(s); }
+function redo(){ const s=redoStack.pop(); if(!s)return; undoStack.push(stateStr()); restoreState(s); }   // direct push, not snap() → keeps redo history intact
 function sync(){ render(); save(); buildTools(); }
 function nearestIdx(a,px,py,bd,pos){ let bi=-1; a.forEach((o,i)=>{ const p=pos(o), d=(p[0]-px)**2+(p[1]-py)**2; if(d<bd){bd=d;bi=i;} }); return bi; }   // nearest item within a SQUARED radius
 function dragDraw(px,py){ const d=curDraws()[dragging.i]; if(d){ const dx=px-dragPrev.x,dy=py-dragPrev.y; for(const p of d.pts){p[0]+=dx;p[1]+=dy;} } dragPrev={x:px,y:py}; }   // translate the grabbed stroke

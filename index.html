@@ -924,7 +924,7 @@ function genDun(){
   function placeRooms(){ let t=0;   // rejection sampling inside the 1-cell border, away from the key/ruler footprints
     while(rooms.length<nroom && t++<nroom*45){ const big=O.roomSize==='large'&&rndf()<0.3; const w=RZ[0]+rnd(RZ[1]+(big?2:0)),h=RZ[0]+rnd(RZ[1]+(big?2:0));
       if(w>cols-2||h>rows-2)continue;   // room can't fit inside the 1-cell border → reject before placing
-      const x=1+rnd(cols-w-2),y=1+rnd(rows-h-2);
+      const x=1+rnd(cols-w-1),y=1+rnd(rows-h-1);
       if(rooms.some(o=>!(x+w+1<o.x||o.x+o.w+1<x||y+h+1<o.y||o.y+o.h+1<y)))continue;
       if(roomHitsRes(x,y,w,h))continue;   // don't spawn rooms under the key/ruler
       rooms.push({x,y,w,h}); for(let r=y;r<y+h;r++)for(let c=x;c<x+w;c++)M.cells[c+','+r]='floor'; }
@@ -937,7 +937,7 @@ function genDun(){
     const dunPath=(a,b,rai,rbi)=>{ const K=(c,r)=>c+','+r, ak=K(a[0],a[1]), bk=K(b[0],b[1]);
       const blocked=(c,r)=>{ if(c<0||r<0||c>=cols||r>=rows)return true; if(RES.has(c+','+r))return true; for(let i=0;i<rooms.length;i++){ if(i===rai||i===rbi)continue; const m=rooms[i]; if(c>=m.x&&c<m.x+m.w&&r>=m.y&&r<m.y+m.h)return true; } return false; };
       const open=[a], g={[ak]:0}, f={[ak]:0}, came={}, dirOf={[ak]:-1}, inOpen=new Set([ak]), closed=new Set(); let guard=0;
-      while(open.length&&guard++<40000){ let bi=0; for(let i=1;i<open.length;i++) if(f[K(open[i][0],open[i][1])]<f[K(open[bi][0],open[bi][1])])bi=i;
+      while(open.length&&guard++<Math.max(40000,cols*rows*4)){ let bi=0; for(let i=1;i<open.length;i++) if(f[K(open[i][0],open[i][1])]<f[K(open[bi][0],open[bi][1])])bi=i;
         const cur=open.splice(bi,1)[0], ck=K(cur[0],cur[1]); inOpen.delete(ck);
         if(ck===bk){ const p=[cur]; let k=ck; while(came[k]){ const pk=came[k]; p.unshift(pk.split(',').map(Number)); k=pk; } return p; }
         closed.add(ck);
@@ -951,6 +951,17 @@ function genDun(){
     const hasEdge=(a,b)=>edges.some(e=>(e[0]===a&&e[1]===b)||(e[0]===b&&e[1]===a));
     { const pairs=[]; for(let i=0;i<rooms.length;i++)for(let j=i+1;j<rooms.length;j++) if(!hasEdge(i,j)) pairs.push([i,j,(cx(rooms[i])-cx(rooms[j]))**2+(cy(rooms[i])-cy(rooms[j]))**2]); pairs.sort((p,q)=>p[2]-q[2]); for(let k=0;k<Math.min(pairs.length,Math.ceil(rooms.length/5));k++) edges.push([pairs[k][0],pairs[k][1]]); }
     for(const[a,b]of edges){ for(const[c,r]of dunPath(ctr(rooms[a]),ctr(rooms[b]),a,b)) M.cells[c+','+r]='floor'; } }
+  function ensureConnected(){   // dunPath's [a,b] fallback can carve nothing → guarantee every room reaches the entrance with an L-tunnel
+    const K=(c,r)=>c+','+r;
+    for(let guard=0; guard<rooms.length+2; guard++){
+      const s=ctr(rooms[0]), seen=new Set([K(s[0],s[1])]), stack=[s];
+      while(stack.length){ const[c,r]=stack.pop(); for(const[dc,dr]of DIRS){ const nc=c+dc,nr=r+dr,nk=K(nc,nr); if(!seen.has(nk)&&M.cells[nk]==='floor'){ seen.add(nk); stack.push([nc,nr]); } } }
+      let bad=-1; for(let i=1;i<rooms.length;i++){ const p=ctr(rooms[i]); if(!seen.has(K(p[0],p[1]))){ bad=i; break; } }
+      if(bad<0)return;
+      const from=ctr(rooms[bad]); let tc=from[0],tr=from[1],bd=1e18;
+      for(const k of seen){ const[c,r]=k.split(',').map(Number), d=(c-from[0])**2+(r-from[1])**2; if(d<bd){bd=d;tc=c;tr=r;} }
+      let c=from[0]; while(c!==tc){ c+=c<tc?1:-1; M.cells[K(c,from[1])]='floor'; }
+      let r=from[1]; while(r!==tr){ r+=r<tr?1:-1; M.cells[K(tc,r)]='floor'; } } }
   // symbol placement on conflict-free cells — shared by the stairs + keys/features phases
   const occupied=new Set();
   const roomCells=m=>{ const o=[]; for(let r=m.y;r<m.y+m.h;r++)for(let c=m.x;c<m.x+m.w;c++) if(M.cells[c+','+r]==='floor') o.push([c,r]); return o; };
@@ -971,7 +982,7 @@ function genDun(){
       for(const side of sides){ let run=[];
         const flush=()=>{ if(run.length){ const e=run[Math.floor(run.length/2)], [oc,or]=side.out(e[0],e[1]), p=cc((e[0]+oc)/2,(e[1]+or)/2);
             M.syms.push({x:p[0],y:p[1],icon:(rndf()<0.18&&SPECIAL.length?pick(SPECIAL):(BY.dungeon['Door1x1']?'Door1x1':SPECIAL[0])),rot:side.rot}); doorMouth.add(e[0]+','+e[1]); } run=[]; };
-        for(const[c,r]of side.cells){ const[oc,or]=side.out(c,r); if(isFloor(c,r)&&isCorr(oc,or)) run.push([c,r]); else flush(); } flush(); } } }
+        for(const[c,r]of side.cells){ const[oc,or]=side.out(c,r); if(isFloor(c,r)&&isCorr(oc,or)&&isFloor(2*oc-c,2*or-r)) run.push([c,r]); else flush(); } flush(); } } }   // require the corridor to continue a second cell out → no doors onto tangent corridors
 
   function placeStairs(){
     let fd=-1; rooms.forEach((m,i)=>{const d=(cx(m)-cx(rooms[0]))**2+(cy(m)-cy(rooms[0]))**2; if(d>fd){fd=d;farI=i;}});   // farthest room gets the down-stair
@@ -979,7 +990,7 @@ function genDun(){
     const stRot=m=>{ const rx=L.ox+cx(m)*L.cell, ry=L.oy+cy(m)*L.cell; let dx=0,dy=0,bd=1e18; for(const s of M.syms){ if(/^Door/.test(s.icon||'')){ const d=(s.x-rx)**2+(s.y-ry)**2; if(d<bd){bd=d;dx=s.x-rx;dy=s.y-ry;} } } if(bd>1e17)return 0; return Math.abs(dx)>=Math.abs(dy)?(dx<0?0:180):(dy<0?90:270); };
     // stairs: interior cell of start/far rooms, maximally far from doors
     const placeStair=(m,rot)=>{ let fc=freeCells(m); if(!fc.length)fc=roomCells(m).filter(([c,r])=>!occupied.has(c+','+r)); if(!fc.length)return; let best=fc[0],bs=-1; for(const[c,r]of fc){const s=doorDist(m,c,r); if(s>bs){bs=s;best=[c,r];}} const p=take(best[0],best[1]); M.syms.push({x:p[0],y:p[1],icon:dnm('StairsFlight1x1','StairSpiralSquareDown1x1'),rot}); };
-    if(O.stairs!=='no'){ placeStair(rooms[0],stRot(rooms[0])); placeStair(rooms[farI],(stRot(rooms[farI])+180)%360); } }
+    if(O.stairs!=='no'){ placeStair(rooms[0],stRot(rooms[0])); if(rooms.length>1&&farI!==0)placeStair(rooms[farI],(stRot(rooms[farI])+180)%360); } }   // no down-stair when the far room is the entrance itself
 
   function placeKeysAndFeatures(){   // key (number) per room: a free corner-ish cell, away from doors; a feature symbol in non-stair rooms
     const feats=['Chest1x1','Altar1x1','Fountain1x1','Statue1x1','Cask1x1','Trap1x1','TableRound1x1','Bookcase1x1','CoffinClosed1x1','Loot1x1','Grave1x1'].filter(n=>BY.dungeon[n]);
@@ -995,7 +1006,7 @@ function genDun(){
       for(let s=0;s<len;s++){ const nc=c+d[0],nr=r+d[1]; if(nc<1||nr<1||nc>=cols-1||nr>=rows-1||roomAt(nc,nr)!==-1||M.cells[nc+','+nr]==='floor'||RES.has(nc+','+nr))break; M.cells[nc+','+nr]='floor'; c=nc;r=nr; if(rndf()<0.35)d=pick(DIRS); } } }
 
   if(!placeRooms()){ render(); save(); commitChange(); return; }
-  carveCorridors(); placeDoors(); placeStairs(); placeKeysAndFeatures(); addDeadEnds();
+  carveCorridors(); ensureConnected(); placeDoors(); placeStairs(); placeKeysAndFeatures(); addDeadEnds();
   render(); maybeFit(); save(); commitChange();
 }
 function doGenerate(){ if(!confirm('Generate a random '+(M.mode==='wild'?'wilderness':'dungeon')+'? This replaces the current map.'))return; (M.mode==='wild'?genWild:genDun)(); }

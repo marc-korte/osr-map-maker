@@ -777,6 +777,7 @@ function edgeRoute(hexes,L){
   return pts;
 }
 function intoHex(center,toward,dist){ const dx=toward[0]-center[0], dy=toward[1]-center[1], d=Math.hypot(dx,dy)||1; return [center[0]+dx/d*dist, center[1]+dy/d*dist]; }
+function clampNear(p,ax,ay,max){ const dx=p[0]-ax,dy=p[1]-ay,d=Math.hypot(dx,dy); if(d<=max)return p; const s=max/d; return [ax+dx*s,ay+dy*s]; }   // keep a jittered point within max of its anchor
 // Roads draw UNDER the terrain symbols, so they run straight through hex CENTRES (a direct, purposeful line)
 // rather than weaving corner-to-corner along hex edges like a river. Douglas-Peucker drops the collinear
 // hex-centre zigzag so long runs read as one clean line; each settlement end stops `gap` short of its symbol.
@@ -830,7 +831,7 @@ function genWild(){
 
   function placeFeatures(){   // scatter features BEFORE routing so roads/rivers can curve around them too
     const feats=[['Ruins',['Grassland','Hills','Forest','Badlands','ForestedHills']],['Cave',['Hills','Mountains','EvergreenMountains','ForestedMountains']],['StandingStones',['Grassland','Badlands','Hills']],['Tower',['Hills','Grassland','ForestedHills']],['Tomb',['Hills','Badlands','Grassland']],['Mine',['Hills','Mountains','EvergreenMountains','ForestedMountains','SnowMountains']]];
-    let ft=0,fp=0; while(fp<4 && ft++<300){ const c=rnd(cols),r=rnd(rows),cur=g[c+','+r],f=pick(feats); if(f[1].includes(cur)&&!settle.some(s=>s[0]===c&&s[1]===r)){M.hex[c+','+r]=f[0]; M.sites.push({c,r,label:genFeatureName(f[0]),kind:'place'}); fp++;} } }
+    let ft=0,fp=0; while(fp<4 && ft++<300){ const c=rnd(cols),r=rnd(rows),cur=g[c+','+r],f=pick(feats); if(f[1].includes(cur)&&!settle.some(s=>s[0]===c&&s[1]===r)&&!M.sites.some(s=>s.c===c&&s.r===r)){M.hex[c+','+r]=f[0]; M.sites.push({c,r,label:genFeatureName(f[0]),kind:'place'}); fp++;} } }
 
   function buildRoads(){   // minimum spanning tree over settlements, each edge routed hex-by-hex around mountains/water
     const rcost=(c,r)=>{ if(RES.has(c+','+r))return 4000; const tt=g[c+','+r];   // roads route around the reserved key footprint
@@ -864,13 +865,13 @@ function genWild(){
       for(let ri=0; ri<hi.length && used.length<nriv; ri++){ const src=hi[ri];
         if(used.some(u=>Math.abs(u[0]-src[0])+Math.abs(u[1]-src[1])<minSep)) continue;
         let tgt=null,bd=1e18;
-        for(const w of waters){ const d=Math.abs(w[0]-src[0])+Math.abs(w[1]-src[1]); if(d>1&&d<bd){bd=d;tgt=w;} }
+        for(const w of waters){ const d=Math.abs(w[0]-src[0])+Math.abs(w[1]-src[1]); if(d>0&&d<bd){bd=d;tgt=w;} }
         if(!tgt){ bd=1e18; for(const e of [[0,src[1]],[cols-1,src[1]],[src[0],0],[src[0],rows-1]]){ const d=Math.abs(e[0]-src[0])+Math.abs(e[1]-src[1]); if(d<bd){bd=d;tgt=e;} } }
         const rp=tgt&&hexPath([src[0],src[1]],tgt,g,rcostR);
-        if(rp&&rp.length>2){ const ctr=rp.map(h=>hcenter(h[0],h[1],L)), j=L.size*0.38, wig=[ctr[0]];   // meander: jittered midpoints + centres, endpoints anchored — a straight run of hexes must never read as a straight river
-          for(let i=1;i<ctr.length;i++){ const a=ctr[i-1],b=ctr[i];
-            wig.push([(a[0]+b[0])/2+(rndf()-.5)*j,(a[1]+b[1])/2+(rndf()-.5)*j]);
-            wig.push(i<ctr.length-1?[b[0]+(rndf()-.5)*j,b[1]+(rndf()-.5)*j]:b); }
+        if(rp&&rp.length>2){ const ctr=rp.map(h=>hcenter(h[0],h[1],L)), j=L.size*0.38, cl=L.size*0.42, wig=[ctr[0]];   // meander: jittered midpoints + centres, endpoints anchored — a straight run of hexes must never read as a straight river
+          for(let i=1;i<ctr.length;i++){ const a=ctr[i-1],b=ctr[i], mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;
+            wig.push(clampNear([mx+(rndf()-.5)*j,my+(rndf()-.5)*j],mx,my,cl));   // clamp jitter so vertices never leave their hex
+            wig.push(i<ctr.length-1?clampNear([b[0]+(rndf()-.5)*j,b[1]+(rndf()-.5)*j],b[0],b[1],cl):b); }
           const pts=smoothStroke(wig), mhx=pickHex(pts[pts.length-1][0],pts[pts.length-1][1],L);   // Chaikin turns the jitter into smooth bends; precompute name anchor + mouth
           M.drawsW.push({pts,kind:'river',name:genPlaceName()+' River',nameIdx:riverNamePt(pts),mouthWater:!!(mhx&&M.hex[mhx[0]+','+mhx[1]]==='Water')}); used.push(src); } } } }
 
@@ -895,7 +896,7 @@ function genWild(){
 function hexPath(a,b,g,cost){
   const key=(c,r)=>c+','+r, ak=key(a[0],a[1]), bk=key(b[0],b[1]);
   const open=[a.slice()], came={}, gs={[ak]:0}, f={[ak]:0}, inOpen=new Set([ak]), closed=new Set(); let guard=0;
-  while(open.length && guard++<8000){
+  while(open.length && guard++<Math.max(8000,M.cols*M.rows*8)){
     let bi=0; for(let i=1;i<open.length;i++) if(f[key(open[i][0],open[i][1])]<f[key(open[bi][0],open[bi][1])])bi=i;
     const cur=open.splice(bi,1)[0], ck=key(cur[0],cur[1]); inOpen.delete(ck);
     if(ck===bk){ const p=[cur]; let k=ck; while(came[k]){ const pk=came[k]; p.unshift(pk.split(',').map(Number)); k=pk; } return p; }

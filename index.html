@@ -150,6 +150,9 @@ function eraseNearestStroke(px,py){ const a=curDraws(); let bi=-1,bd=ERASE_STROK
 const undoStack=[], redoStack=[];
 function stateStr(){ return JSON.stringify({mode:M.mode,cols:M.cols,rows:M.rows,colsW:M.colsW,rowsW:M.rowsW,colsD:M.colsD,rowsD:M.rowsD,title:M.title,titleW:M.titleW,titleD:M.titleD,milesPerHex:M.milesPerHex,feetPerSquare:M.feetPerSquare,hex:M.hex,sites:M.sites,roads:M.roads,cells:M.cells,syms:M.syms,labels:M.labels,drawsW:M.drawsW,drawsD:M.drawsD}); }
 function snap(){ undoStack.push(stateStr()); if(undoStack.length>UNDO_MAX)undoStack.shift(); redoStack.length=0; }   // any new action invalidates redo
+let _pre=null;
+function beginChange(){ _pre=stateStr(); }   // capture pre-state; commitChange pushes it only if something actually changed
+function commitChange(){ if(_pre===null)return; if(stateStr()!==_pre){ undoStack.push(_pre); if(undoStack.length>UNDO_MAX)undoStack.shift(); redoStack.length=0; } _pre=null; }
 function syncDimsDOM(){ document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows; document.getElementById('title').value=M.title;
   document.getElementById('scale').value=(M.mode==='wild'?(M.milesPerHex||1):(M.feetPerSquare||10)); }
 function restoreState(s){ const o=JSON.parse(s), switched=o.mode!==M.mode; Object.assign(M,o);
@@ -508,14 +511,14 @@ let painting=false;
 // tool handlers, one small function each — fn(px,py,first,L). HANDLERS.any applies in both modes;
 // tools in ONCE fire on pointerdown only, everything else repeats while dragging.
 const STROKE_KIND={drawriver:'river',drawroad:'road',drawtrail:'trail',drawborder:'border'};
-function toolStroke(px,py,first){ if(first){ snap(); curStroke={pts:[[px,py]],kind:STROKE_KIND[tool]}; }
+function toolStroke(px,py,first){ if(first){ curStroke={pts:[[px,py]],kind:STROKE_KIND[tool]}; }
   else if(curStroke){ const p=curStroke.pts[curStroke.pts.length-1]; if((p[0]-px)**2+(p[1]-py)**2>9) curStroke.pts.push([px,py]); } }
-function toolEraseLine(px,py){ snap(); eraseNearestStroke(px,py); }
-function toolBorderEdge(px,py,first,L){ const e=nearestEdge(px,py,L); if(!e)return; if(first){snap();borderLast=null;}
+function toolEraseLine(px,py){ eraseNearestStroke(px,py); }
+function toolBorderEdge(px,py,first,L){ const e=nearestEdge(px,py,L); if(!e)return; if(first)borderLast=null;
   if(borderLast!==e.key){ borderLast=e.key; const arr=curDraws(); if(!arr.some(d=>d.edgeKey===e.key)) arr.push({pts:[e.a,e.b],kind:'border',edgeKey:e.key}); } }
-function toolPaintHex(px,py,first,L){ const hx=pickHex(px,py,L); if(!hx)return; if(first)snap(); const k=hx[0]+','+hx[1];
+function toolPaintHex(px,py,first,L){ const hx=pickHex(px,py,L); if(!hx)return; const k=hx[0]+','+hx[1];
   if(tool==='erasehex')delete M.hex[k]; else if(tool==='water')M.hex[k]='Water'; else M.hex[k]={n:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}; }
-function toolPaintCell(px,py,first,L){ const c=pickCell(px,py,L); if(!c)return; if(first)snap();
+function toolPaintCell(px,py,first,L){ const c=pickCell(px,py,L); if(!c)return;
   if(tool==='floor')M.cells[c[0]+','+c[1]]='floor'; else delete M.cells[c[0]+','+c[1]]; }
 function toolSelectWild(px,py,first,L){
   if(first){ selHex=null; selDraw=-1; selSite=-1; dragging=null; dragPrev={x:px,y:py};
@@ -524,8 +527,7 @@ function toolSelectWild(px,py,first,L){
     else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};}
       else { const hx=pickHex(px,py,L); if(hx&&M.hex[hx[0]+','+hx[1]])selHex=hx[0]+','+hx[1]; } }   // select a hex (for Del/G) but DON'T grab it → empty/terrain drag falls through to pan, like the dungeon
     buildTools(); }
-  else if(dragging){ if(!dragging.snapped){snap();dragging.snapped=true;}   // snapshot at the first real move — a bare selection click mutates nothing
-    if(dragging.k==='draw')dragDraw(px,py); else { const hx=pickHex(px,py,L); if(hx&&dragging.k==='site'){M.sites[dragging.i].c=hx[0];M.sites[dragging.i].r=hx[1];} } } }
+  else if(dragging){ if(dragging.k==='draw')dragDraw(px,py); else { const hx=pickHex(px,py,L); if(hx&&dragging.k==='site'){M.sites[dragging.i].c=hx[0];M.sites[dragging.i].r=hx[1];} } } }
 function toolSelectDun(px,py,first,L){
   if(first){ sel=-1; selDraw=-1; selLabel=-1; dragging=null; dragPrev={x:px,y:py};
     const bi=nearestIdx(M.syms,px,py,PICK_SYM2,s=>[s.x,s.y]);
@@ -533,16 +535,15 @@ function toolSelectDun(px,py,first,L){
     else { const si=pickStroke(px,py); if(si>=0){selDraw=si;dragging={k:'draw',i:si};}
       else { const li=nearestIdx(M.labels,px,py,PICK_SYM2,l=>[l.x,l.y]); if(li>=0){selLabel=li;dragging={k:'l',i:li};} } }
     buildTools(); }
-  else if(dragging){ if(!dragging.snapped){snap();dragging.snapped=true;}   // snapshot at the first real move — a bare selection click mutates nothing
-    if(dragging.k==='draw')dragDraw(px,py); else if(dragging.k==='s'){ const o=M.syms[dragging.i]; if(o){const[sx,sy]=snapPt(px,py,L); o.x=sx; o.y=sy;} } else { const o=M.labels[dragging.i]; if(o){o.x=px;o.y=py;} } } }
+  else if(dragging){ if(dragging.k==='draw')dragDraw(px,py); else if(dragging.k==='s'){ const o=M.syms[dragging.i]; if(o){const[sx,sy]=snapPt(px,py,L); o.x=sx; o.y=sy;} } else { const o=M.labels[dragging.i]; if(o){o.x=px;o.y=py;} } } }
 function toolSite(px,py,first,L){ const hx=pickHex(px,py,L); if(!hx)return; const ex=M.sites.find(s=>s.c===hx[0]&&s.r===hx[1]);
   const label=prompt(ex&&ex.kind==='place'?'Place name:':'Site label (e.g. Hush Road):', ex?ex.label:'');
-  if(label!==null){ snap(); M.sites=M.sites.filter(s=>!(s.c===hx[0]&&s.r===hx[1])); M.sites.push({c:hx[0],r:hx[1],label:label||'',...(ex&&ex.kind==='place'?{kind:'place'}:{})}); } }
-function toolLabel(px,py){ snap(); const t=prompt('Label text:',''); if(t)M.labels.push({x:px,y:py,text:t}); }
-function toolKey(px,py,first,L){ snap(); const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,type:'key'}); sel=M.syms.length-1; buildTools(); }
-function toolEraseSym(px,py){ snap(); const bi=nearestIdx(M.syms,px,py,PICK_SYM2,s=>[s.x,s.y]); if(bi>=0)M.syms.splice(bi,1);
+  if(label!==null){ M.sites=M.sites.filter(s=>!(s.c===hx[0]&&s.r===hx[1])); M.sites.push({c:hx[0],r:hx[1],label:label||'',...(ex&&ex.kind==='place'?{kind:'place'}:{})}); } }
+function toolLabel(px,py){ const t=prompt('Label text:',''); if(t)M.labels.push({x:px,y:py,text:t}); }
+function toolKey(px,py,first,L){ const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,type:'key'}); sel=M.syms.length-1; buildTools(); }
+function toolEraseSym(px,py){ const bi=nearestIdx(M.syms,px,py,PICK_SYM2,s=>[s.x,s.y]); if(bi>=0)M.syms.splice(bi,1);
   else{ let li=-1; M.labels.forEach((l,i)=>{if((l.x-px)**2+(l.y-py)**2<PICK_SYM2)li=i;}); if(li>=0)M.labels.splice(li,1); } sel=-1; buildTools(); }
-function toolStamp(px,py,first,L){ snap(); const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,icon:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}); sel=M.syms.length-1; buildTools(); }
+function toolStamp(px,py,first,L){ const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,icon:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}); sel=M.syms.length-1; buildTools(); }
 const HANDLERS={
   any:{drawriver:toolStroke,drawroad:toolStroke,drawtrail:toolStroke,drawborder:toolStroke,eraseline:toolEraseLine,borderedge:toolBorderEdge},
   wild:{terrain:toolPaintHex,water:toolPaintHex,erasehex:toolPaintHex,select:toolSelectWild,site:toolSite},
@@ -550,13 +551,14 @@ const HANDLERS={
 const ONCE=new Set(['site','label','key','erase','stamp','eraseline']);   // pointerdown-only tools (the old `else if(!first)return` gate)
 function apply(px,py,first){
   if(ONCE.has(tool)&&!first)return;
+  if(first)beginChange();   // pointerdown opens a transaction; endPtr's commitChange discards it if nothing changed
   const h=HANDLERS.any[tool]||(HANDLERS[M.mode]||{})[tool];
   if(h)h(px,py,first,layout());
   render();
 }
 function commitRoad(){ if(M.curRoad&&M.curRoad.length>1)M.roads.push([M.curRoad,M.curStyle||'road']); M.curRoad=null; render(); save(); }
 let dragging=null;
-function applyT(kind){ snap(); const t=tT(); if(kind==='rot')t.rot=((t.rot||0)+90)%360; else t[kind]=!t[kind]; sync(); }
+function applyT(kind){ beginChange(); const t=tT(); if(kind==='rot')t.rot=((t.rot||0)+90)%360; else t[kind]=!t[kind]; sync(); commitChange(); }
 // Pointer Events unify mouse / pen / touch. Two simultaneous pointers = pinch-zoom + pan.
 const ptrs=new Map(); let pinching=false, pinchDist=0, pinchMid=null, panning=false, panLast=null, spaceHeld=false;
 function ptrArr(){ return [...ptrs.values()]; }
@@ -580,7 +582,7 @@ cv.addEventListener('pointermove',e=>{ if(ptrs.has(e.pointerId))ptrs.set(e.point
   const[x,y]=evpos(e); hoverX=x; hoverY=y; if(painting){apply(x,y,false);}else{scheduleGhost();updateHoverCursor(x,y);} });
 function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2){ pinching=false; pinchDist=0; pinchMid=null; }
   if(panning&&ptrs.size===0){ panning=false; panLast=null; setCursor(); }
-  if(ptrs.size===0){ commitStroke(); if(painting){painting=false;dragging=null;render();save();} } }
+  if(ptrs.size===0){ commitStroke(); commitChange(); if(painting){painting=false;dragging=null;render();save();} } }
 cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse'){hoverX=hoverY=null;render();} });
@@ -592,8 +594,8 @@ window.addEventListener('keydown',e=>{ if(e.key==='Escape'){commitRoad();curStro
   if(e.key===' '||e.code==='Space'){ if(!spaceHeld){spaceHeld=true;setCursor();} e.preventDefault(); return; }   // hold Space = pan (hand)
   const k=e.key.toLowerCase();
   if(k==='r')applyT('rot'); else if(k==='h')applyT('fx'); else if(k==='v')applyT('fy'); else if(k==='i')applyT('inv');
-  else if(k==='g'){ const s=selection(); if(s){ snap(); s.o.gm=!s.o.gm; sync(); } }
-  else if(k==='delete'||k==='backspace'){ const s=selection(); if(s){ snap(); s.del(); sync(); } } });
+  else if(k==='g'){ const s=selection(); if(s){ beginChange(); s.o.gm=!s.o.gm; sync(); commitChange(); } }
+  else if(k==='delete'||k==='backspace'){ const s=selection(); if(s){ beginChange(); s.del(); sync(); commitChange(); } } });
 window.addEventListener('keyup',e=>{ if(e.key===' '||e.code==='Space'){ spaceHeld=false; if(!panning)setCursor(); } });
 
 // ---------- persistence + export ----------
@@ -657,19 +659,19 @@ function slotSaveAs(){ readTitle(); let name=prompt('Map name:',M.title||'map');
   if(slotWrite(name,JSON.stringify(M)))buildTools(); }
 function slotLoad(name){ let raw=null; try{ raw=localStorage.getItem(SLOT_PRE+name); }catch(e){}
   const o=raw?parseMap(raw):null; if(!o){ showBanner('Saved map “'+name+'” is corrupted and couldn’t be loaded.'); return; }
-  snap(); loadMapObj(o); afterLoad(); }
+  beginChange(); loadMapObj(o); afterLoad(); commitChange(); }
 function slotRename(name){ let nn=prompt('Rename “'+name+'” to:',name); if(nn==null)return; nn=nn.trim().slice(0,40); if(!nn||nn===name)return;
   if(slotNames().includes(nn)&&!confirm('Overwrite saved map “'+nn+'”?'))return;
   try{ const raw=localStorage.getItem(SLOT_PRE+name); if(raw==null)return; if(slotWrite(nn,raw))localStorage.removeItem(SLOT_PRE+name); }catch(e){}
   buildTools(); }
 function slotDelete(name){ if(!confirm('Delete saved map “'+name+'”?'))return; try{ localStorage.removeItem(SLOT_PRE+name); }catch(e){} buildTools(); }
 document.getElementById('title').addEventListener('input',()=>{readTitle();render();});
-document.getElementById('scale').addEventListener('input',e=>{ const v=Math.max(0.01,+e.target.value||0); if(M.mode==='wild')M.milesPerHex=v; else M.feetPerSquare=v; render(); save(); });
+document.getElementById('scale').addEventListener('input',e=>{ beginChange(); const v=Math.max(0.01,+e.target.value||0); if(M.mode==='wild')M.milesPerHex=v; else M.feetPerSquare=v; render(); save(); commitChange(); });
 document.getElementById('tabWild').onclick=()=>setMode('wild');
 document.getElementById('tabDun').onclick=()=>setMode('dun');
 document.getElementById('undo').onclick=undo;
 document.getElementById('redo').onclick=redo;
-document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; snap(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.curRoad=null;M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); };
+document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; beginChange(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.curRoad=null;M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); commitChange(); };
 function applyResize(){ const c=Math.max(3,Math.min(120,Math.round(+document.getElementById('cols').value||3))), r=Math.max(3,Math.min(120,Math.round(+document.getElementById('rows').value||3))); document.getElementById('cols').value=c; document.getElementById('rows').value=r; M.cols=c; M.rows=r; if(M.mode==='wild'){M.colsW=c;M.rowsW=r;}else{M.colsD=c;M.rowsD=r;} render(); maybeFit(); save(); }
 document.getElementById('cols').addEventListener('change',applyResize);   // auto-resize on commit (Enter/blur) — no Resize button
 document.getElementById('rows').addEventListener('change',applyResize);
@@ -678,7 +680,7 @@ document.getElementById('load').onclick=()=>document.getElementById('file').clic
 document.getElementById('file').onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
   rd.onload=()=>{ let o; try{ o=JSON.parse(rd.result); }catch(err){ showBanner('Couldn’t load “'+f.name+'”: not valid JSON ('+(err&&err.message||err)+').'); return; }
     const err=validateMap(o); if(err){ showBanner('Couldn’t load “'+f.name+'”: '+err+'.'); return; }
-    snap(); loadMapObj(o); afterLoad(); };   // snap first → an accidental Load is undoable
+    beginChange(); loadMapObj(o); afterLoad(); commitChange(); };   // transaction → an accidental Load is undoable
   rd.readAsText(f); e.target.value=''; };
 const MAX_EXPORT_PX=16e6;   // Safari/iOS cap is ~16.7MP; stay under or the canvas exports blank
 document.getElementById('export').onclick=()=>{ readTitle();
@@ -769,7 +771,7 @@ function roadRoute(path,L){
   return simplifyDP(pts, L.size*0.5);                           // collapse straight runs of hexes into single segments
 }
 function genWild(){
-  snap(); M.hex={}; M.sites=[]; M.roads=[]; M.drawsW=[]; selHex=null;
+  beginChange(); M.hex={}; M.sites=[]; M.roads=[]; M.drawsW=[]; selHex=null;
   M.title=M.titleW=genRegionName(); { const ti=document.getElementById('title'); if(ti)ti.value=M.title; }   // fresh region name each generate
   const cols=M.cols, rows=M.rows, L=layout(), RES=legendReserveWild(L);   // key footprint kept content-free (ruler lives in the bottom margin)
   const g={}, settle=[];   // working terrain grid + settlement hexes, shared across the phases below
@@ -871,7 +873,7 @@ function genWild(){
   seedTerrain(); smoothTerrain(); floodOcean(); commitTerrain();
   placeSettlements(); placeFeatures(); buildRoads(); carveRivers(); nameWaters();
   M.sites=M.sites.filter(s=>!RES.has(s.c+','+s.r));   // safety: nothing labeled under the key
-  render(); maybeFit(); save();
+  render(); maybeFit(); save(); commitChange();
 }
 function hexPath(a,b,g,cost){
   const key=(c,r)=>c+','+r, ak=key(a[0],a[1]), bk=key(b[0],b[1]);
@@ -887,7 +889,7 @@ function hexPath(a,b,g,cost){
 }
 
 function genDun(){
-  snap(); M.cells={}; M.syms=[]; M.labels=[]; M.drawsD=[]; sel=-1; selDraw=-1; selLabel=-1;
+  beginChange(); M.cells={}; M.syms=[]; M.labels=[]; M.drawsD=[]; sel=-1; selDraw=-1; selLabel=-1;
   const cols=M.cols, rows=M.rows, L=layout(), cc=(c,r)=>[L.ox+(c+0.5)*L.cell,L.oy+(r+0.5)*L.cell];
   const RES=dunReserve(L), roomHitsRes=(x,y,w,h)=>{ for(let r=y;r<y+h;r++)for(let c=x;c<x+w;c++)if(RES.has(c+','+r))return true; return false; };   // key + ruler footprints kept as rock
   const O=Object.assign({density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'},M.dunOpts||{});
@@ -974,9 +976,9 @@ function genDun(){
     for(let i=0;i<cnt&&corr.length;i++){ let[c,r]=pick(corr), d=pick(DIRS), len=2+rnd(4);
       for(let s=0;s<len;s++){ const nc=c+d[0],nr=r+d[1]; if(nc<1||nr<1||nc>=cols-1||nr>=rows-1||roomAt(nc,nr)!==-1||M.cells[nc+','+nr]==='floor'||RES.has(nc+','+nr))break; M.cells[nc+','+nr]='floor'; c=nc;r=nr; if(rndf()<0.35)d=pick(DIRS); } } }
 
-  if(!placeRooms()){ render(); save(); return; }
+  if(!placeRooms()){ render(); save(); commitChange(); return; }
   carveCorridors(); placeDoors(); placeStairs(); placeKeysAndFeatures(); addDeadEnds();
-  render(); maybeFit(); save();
+  render(); maybeFit(); save(); commitChange();
 }
 function doGenerate(){ if(!confirm('Generate a random '+(M.mode==='wild'?'wilderness':'dungeon')+'? This replaces the current map.'))return; (M.mode==='wild'?genWild:genDun)(); }
 

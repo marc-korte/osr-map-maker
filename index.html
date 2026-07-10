@@ -62,8 +62,8 @@
   <button id="tabWild" class="on">Wilderness</button><button id="tabDun">Dungeon</button>
   <input type="text" id="title" value="THE HUSH" size="20" title="Map title">
   <span class="spacer"></span>
-  <label class="num">cols <input type="number" id="cols" value="9" min="3" max="120"></label>
-  <label class="num">rows <input type="number" id="rows" value="12" min="3" max="120"></label>
+  <label class="num">cols <input type="number" id="cols" value="9" min="8" max="120"></label>
+  <label class="num">rows <input type="number" id="rows" value="12" min="8" max="120"></label>
   <label class="num" id="scaleLbl">miles/hex <input type="number" id="scale" value="1" min="0.1" step="0.5" title="Map scale: miles per hex (wilderness) / feet per square (dungeon)"></label>
   <button id="undo" title="Ctrl+Z">Undo</button><button id="redo" title="Ctrl+Y">Redo</button><button id="clear">Clear</button>
   <button id="save">Save .json</button><button id="load">Load</button><input type="file" id="file" accept=".json" style="display:none">
@@ -111,6 +111,7 @@ const PAN_MARGIN=120;       // how far past the map edge panning may go (logical
 const ZOOM_MIN=0.04, ZOOM_MAX=8;   // manual zoom bounds (zoomFit may go smaller)
 const PICK_SITE2=900, PICK_SYM2=1300, PICK_STROKE2=140, ERASE_STROKE2=400;   // SQUARED pick radii (logical px²)
 const UNDO_MAX=50;
+const WILD_MIN={c:8,r:8}, DUN_MIN={c:12,r:14};   // below these the legend reserve blanks generation; dungeon legend ≈ 9 cols × 12 rows + play margin
 const SEL='#c9a227';  // selection gold (matches CSS --hl)
 const ICONS=window.ICONS||{hex:[],dungeon:[]};
 const BY={hex:{},dungeon:{}}; for(const s of ['hex','dungeon']) for(const it of ICONS[s]) BY[s][it.n]=it;
@@ -497,7 +498,8 @@ function mapsPanel(a){
 function setMode(m){ M.mode=m; commitRoad(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; borderLast=null; dragging=null; curStroke=null;
   const tw=document.getElementById('tabWild'),td=document.getElementById('tabDun'); tw.classList.toggle('on',m==='wild'); td.classList.toggle('on',m==='dun'); press(tw,m==='wild'); press(td,m==='dun');
   tool=(m==='wild'?'terrain':'stamp'); curIcon=(m==='wild'?'Forest':(ICONS.dungeon[0]||{}).n||'Door1x1');
-  M.cols=(m==='wild'?M.colsW:M.colsD); M.rows=(m==='wild'?M.rowsW:M.rowsD);
+  M.cols=(m==='wild'?M.colsW:M.colsD); M.rows=(m==='wild'?M.rowsW:M.rowsD); filter='';   // filter is dungeon-only; drop it so a stale term doesn't hide the wild palette
+  const mn=(m==='wild'?WILD_MIN:DUN_MIN); document.getElementById('cols').min=mn.c; document.getElementById('rows').min=mn.r;
   document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows;
   document.getElementById('title').value=(m==='wild'?M.titleW:M.titleD); M.title=document.getElementById('title').value;
   const sc=document.getElementById('scale'), sl=document.getElementById('scaleLbl');
@@ -616,8 +618,9 @@ function validateMap(o){ if(!o||typeof o!=='object'||Array.isArray(o)) return 'n
   return null; }
 function migrateMap(o){ o.v=SCHEMA_V; const D=JSON.parse(M0); let dropped=0;   // fill v1 gaps from defaults, clamp sizes, drop malformed items
   for(const k in D) if(o[k]===undefined||o[k]===null) o[k]=D[k];
-  const clamp=v=>Math.max(3,Math.min(120,Math.round(+v||3)));
-  for(const k of ['cols','rows','colsW','rowsW','colsD','rowsD']) o[k]=clamp(o[k]);
+  const clamp=(v,mn)=>Math.max(mn,Math.min(120,Math.round(+v||mn)));
+  o.colsW=clamp(o.colsW,WILD_MIN.c); o.rowsW=clamp(o.rowsW,WILD_MIN.r); o.colsD=clamp(o.colsD,DUN_MIN.c); o.rowsD=clamp(o.rowsD,DUN_MIN.r);
+  const am=(o.mode==='dun'?DUN_MIN:WILD_MIN); o.cols=clamp(o.cols,am.c); o.rows=clamp(o.rows,am.r);
   const num=x=>typeof x==='number'&&Number.isFinite(x), filt=(a,f)=>{ const b=a.filter(f); dropped+=a.length-b.length; return b; };
   const pt=p=>Array.isArray(p)&&num(p[0])&&num(p[1]);
   const draws=a=>filt(a,d=>{ if(!d||!Array.isArray(d.pts))return false; d.pts=d.pts.filter(pt); return d.pts.length>0; });   // strip bad points too, not just bad strokes
@@ -672,7 +675,20 @@ document.getElementById('tabDun').onclick=()=>setMode('dun');
 document.getElementById('undo').onclick=undo;
 document.getElementById('redo').onclick=redo;
 document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; beginChange(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.curRoad=null;M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); commitChange(); };
-function applyResize(){ const c=Math.max(3,Math.min(120,Math.round(+document.getElementById('cols').value||3))), r=Math.max(3,Math.min(120,Math.round(+document.getElementById('rows').value||3))); document.getElementById('cols').value=c; document.getElementById('rows').value=r; M.cols=c; M.rows=r; if(M.mode==='wild'){M.colsW=c;M.rowsW=r;}else{M.colsD=c;M.rowsD=r;} render(); maybeFit(); save(); }
+function pruneOutOfBounds(){ const L=layout();   // resize can leave content past the new edge — drop it so it can't reappear on regrow or silently vanish from export
+  for(const k in M.hex){ const p=k.split(',').map(Number); if(p[0]>=M.cols||p[1]>=M.rows)delete M.hex[k]; }
+  for(const k in M.cells){ const p=k.split(',').map(Number); if(p[0]>=M.cols||p[1]>=M.rows)delete M.cells[k]; }
+  M.sites=M.sites.filter(s=>s.c<M.cols&&s.r<M.rows);
+  if(M.mode==='dun'){ M.syms=M.syms.filter(s=>pickCell(s.x,s.y,L)); M.labels=M.labels.filter(l=>pickCell(l.x,l.y,L)); } }
+function applyResize(){ const mn=(M.mode==='wild'?WILD_MIN:DUN_MIN);
+  const c=Math.max(mn.c,Math.min(120,Math.round(+document.getElementById('cols').value||mn.c))), r=Math.max(mn.r,Math.min(120,Math.round(+document.getElementById('rows').value||mn.r)));
+  document.getElementById('cols').value=c; document.getElementById('rows').value=r;
+  if(c===M.cols&&r===M.rows)return;
+  const Lold=layout(); beginChange();
+  M.cols=c; M.rows=r; if(M.mode==='wild'){M.colsW=c;M.rowsW=r;}else{M.colsD=c;M.rowsD=r;}
+  fitCanvas(); const Lnew=layout(), dx=Lnew.ox-Lold.ox, dy=Lnew.oy-Lold.oy;   // hex/cell sizes are constants → a pure (dx,dy) shift keeps strokes on their hexes
+  if(dx||dy){ for(const d of curDraws())for(const p of d.pts){p[0]+=dx;p[1]+=dy;} if(M.mode==='dun'){ for(const s of M.syms){s.x+=dx;s.y+=dy;} for(const l of M.labels){l.x+=dx;l.y+=dy;} } }
+  pruneOutOfBounds(); commitChange(); render(); maybeFit(); save(); }
 document.getElementById('cols').addEventListener('change',applyResize);   // auto-resize on commit (Enter/blur) — no Resize button
 document.getElementById('rows').addEventListener('change',applyResize);
 document.getElementById('save').onclick=()=>{ readTitle(); const b=new Blob([JSON.stringify(M)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=(M.title||'map').replace(/\W+/g,'_')+'.json'; a.click(); };

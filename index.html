@@ -130,7 +130,7 @@ const SCHEMA_V=2;   // save-file schema version; absent v = v1 (everything shipp
 const M={ v:SCHEMA_V, mode:'wild', title:'THE HUSH', titleW:'THE HUSH', titleD:'THE DUNGEON',
   cols:9, rows:12, colsW:9, rowsW:12, colsD:28, rowsD:36, view:'gm',
   layers:[{id:'terrain',label:'Terrain',vis:true,gm:false},{id:'lines',label:'Lines',vis:true,gm:false},{id:'symbols',label:'Symbols',vis:true,gm:false},{id:'keys',label:'Keys',vis:true,gm:false},{id:'text',label:'Text',vis:true,gm:false}],
-  hex:{}, sites:[], roads:[], cells:{}, syms:[], labels:[], drawsW:[], drawsD:[], curStyle:'road', gridBg:true, snap:true, milesPerHex:1, feetPerSquare:10 };
+  hex:{}, sites:[], roads:[], cells:{}, syms:[], labels:[], drawsW:[], drawsD:[], curStyle:'road', gridBg:true, snap:true, milesPerHex:1, feetPerSquare:10, seedW:'', seedD:'' };
 const M0=JSON.stringify(M);   // pristine defaults — loads fill/reset missing fields from this
 let tool='terrain', curIcon='Forest', filter='';
 let stampT={rot:0,fx:false,fy:false,inv:false};   // transform for new/selected stamps
@@ -437,6 +437,9 @@ function buildTools(){
     : [['floor','Floor'],['rock','Rock'],['select','Select/Move'],['drawriver','River'],['drawroad','Road'],['drawtrail','Trail'],['drawborder','Border'],['key','Keyed #'],['label','Label'],['erase','Erase'],['eraseline','Erase line']];
   for(const[id,lab]of btns){ const b=document.createElement('button'); b.className='tool'+(tool===id?' on':''); press(b,tool===id); b.textContent=lab; b.onclick=()=>{ tool=id; buildTools(); }; a.appendChild(b); }
   { const h3=document.createElement('h3'); h3.textContent=(M.mode==='dun'?'Generate options':'Generate'); a.appendChild(h3);
+    { const w=document.createElement('label'); w.className='num'; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode('Seed'));   // reproducible generation; blank = random each time
+      const si=document.createElement('input'); si.type='text'; si.id=(M.mode==='dun'?'seedD':'seedW'); si.placeholder='blank = random'; si.value=(M.mode==='dun'?M.seedD:M.seedW)||''; si.style.cssText='flex:1;min-width:0;';
+      si.onchange=()=>{ const v=si.value.trim(); if(M.mode==='dun')M.seedD=v; else M.seedW=v; save(); }; w.appendChild(si); a.appendChild(w); }
     if(M.mode==='dun'){ M.dunOpts=Object.assign({density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'},M.dunOpts||{});   // donjon-style generate options
       const mkSel=(key,label,vals)=>{ const w=document.createElement('label'); w.className='num'; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode(label));   // NB: named mkSel — a local `sel` would shadow the selected-symbol index
         const s=document.createElement('select'); s.style.cssText='flex:1;background:#111;color:#eee;border:1px solid #555;border-radius:4px;padding:3px;font-size:12px;';
@@ -629,7 +632,7 @@ function migrateMap(o){ o.v=SCHEMA_V; const D=JSON.parse(M0); let dropped=0;   /
   o.syms=filt(o.syms,s=>s&&num(s.x)&&num(s.y)); o.labels=filt(o.labels,l=>l&&num(l.x)&&num(l.y)); o.sites=filt(o.sites,s=>s&&num(s.c)&&num(s.r));
   for(const k in o.hex){ const h=o.hex[k]; if(!(typeof h==='string'||(h&&typeof h==='object'&&typeof h.n==='string'))){ delete o.hex[k]; dropped++; } }   // legendWild reads t.n on non-strings
   return dropped; }
-const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rowsW','colsD','rowsD','view','layers','hex','sites','roads','cells','syms','labels','drawsW','drawsD','curStyle','gridBg','snap','milesPerHex','feetPerSquare','dunOpts'];
+const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rowsW','colsD','rowsD','view','layers','hex','sites','roads','cells','syms','labels','drawsW','drawsD','curStyle','gridBg','snap','milesPerHex','feetPerSquare','dunOpts','seedW','seedD'];
 function applyMap(o){ const D=JSON.parse(M0); for(const k of MAP_KEYS) M[k]=(o[k]!==undefined)?o[k]:D[k]; }   // whitelist: keys absent in the save reset to defaults (no leftovers from the previous map)
 function loadMapObj(o){ if(o.v>SCHEMA_V) showBanner('This map was saved by a newer version of OSR Map Maker — loading anyway.');
   const dropped=migrateMap(o); applyMap(o);
@@ -730,7 +733,14 @@ function setView(v){ M.view=v; const b=document.getElementById('view'); b.textCo
 document.getElementById('view').onclick=()=>setView(M.view==='gm'?'player':'gm');
 
 // ---------- random generation (+ coherence sweep) ----------
-const rnd=n=>Math.floor(Math.random()*n), rndf=()=>Math.random(), pick=a=>a[rnd(a.length)];
+// ---- seeded PRNG: one central swap so both generators reproduce from a text seed ----
+let _rng=Math.random;
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function hashSeed(str){ let h=1779033703^str.length; for(let i=0;i<str.length;i++){ h=Math.imul(h^str.charCodeAt(i),3432918353); h=(h<<13)|(h>>>19); } return (h^h>>>16)>>>0; }
+function seedRng(seed){ _rng=mulberry32(hashSeed(String(seed))); }
+function mintSeed(){ const cs='abcdefghjkmnpqrstuvwxyz23456789'; let s=''; for(let i=0;i<8;i++)s+=cs[Math.floor(Math.random()*cs.length)]; return s; }   // Math.random (not _rng) so a fresh mint is unpredictable
+function resolveSeed(s){ s=(s==null?'':String(s)).trim(); return s||mintSeed(); }
+const rnd=n=>Math.floor(_rng()*n), rndf=()=>_rng(), pick=a=>a[rnd(a.length)];
 // fantasy place-name generator (syllable tables) — used to label settlements/features on generated maps; names stay editable.
 function genPlaceName(){
   const A=['Kor','El','Vor','Bren','Ash','Dun','Mor','Cael','Thal','Gran','Wyn','Hal','Drak','Fen','Sil','Bal','Tor','Esk','Ald','Rav','Gwyn','Cor','Mar','Oth'];
@@ -788,7 +798,9 @@ function roadRoute(path,L){
   pts[n]=intoHex(pts[n],pts[n-1],gap);                          // end:   same
   return simplifyDP(pts, L.size*0.5);                           // collapse straight runs of hexes into single segments
 }
-function genWild(){
+function genWild(seedArg){
+  const seed=resolveSeed(seedArg||M.seedW); seedRng(seed); M.seedW=seed; { const sf=document.getElementById('seedW'); if(sf)sf.value=seed; }   // seed: arg → field/M → freshly minted
+  try{
   beginChange(); M.hex={}; M.sites=[]; M.roads=[]; M.drawsW=[]; selHex=null;
   M.title=M.titleW=genRegionName(); { const ti=document.getElementById('title'); if(ti)ti.value=M.title; }   // fresh region name each generate
   const cols=M.cols, rows=M.rows, L=layout(), RES=legendReserveWild(L);   // key footprint kept content-free (ruler lives in the bottom margin)
@@ -892,6 +904,7 @@ function genWild(){
   placeSettlements(); placeFeatures(); buildRoads(); carveRivers(); nameWaters();
   M.sites=M.sites.filter(s=>!RES.has(s.c+','+s.r));   // safety: nothing labeled under the key
   render(); maybeFit(); save(); commitChange();
+  } finally { _rng=Math.random; }   // seeding must never leak into later non-generation randomness
 }
 function hexPath(a,b,g,cost){
   const key=(c,r)=>c+','+r, ak=key(a[0],a[1]), bk=key(b[0],b[1]);
@@ -906,7 +919,9 @@ function hexPath(a,b,g,cost){
   } return null;
 }
 
-function genDun(){
+function genDun(seedArg){
+  const seed=resolveSeed(seedArg||M.seedD); seedRng(seed); M.seedD=seed; { const sf=document.getElementById('seedD'); if(sf)sf.value=seed; }   // seed: arg → field/M → freshly minted
+  try{
   beginChange(); M.cells={}; M.syms=[]; M.labels=[]; M.drawsD=[]; sel=-1; selDraw=-1; selLabel=-1;
   const cols=M.cols, rows=M.rows, L=layout(), cc=(c,r)=>[L.ox+(c+0.5)*L.cell,L.oy+(r+0.5)*L.cell];
   const RES=dunReserve(L), roomHitsRes=(x,y,w,h)=>{ for(let r=y;r<y+h;r++)for(let c=x;c<x+w;c++)if(RES.has(c+','+r))return true; return false; };   // key + ruler footprints kept as rock
@@ -1008,6 +1023,7 @@ function genDun(){
   if(!placeRooms()){ render(); save(); commitChange(); return; }
   carveCorridors(); ensureConnected(); placeDoors(); placeStairs(); placeKeysAndFeatures(); addDeadEnds();
   render(); maybeFit(); save(); commitChange();
+  } finally { _rng=Math.random; }   // covers the early return above too — seeding never leaks past a generate
 }
 function doGenerate(){ if(!confirm('Generate a random '+(M.mode==='wild'?'wilderness':'dungeon')+'? This replaces the current map.'))return; (M.mode==='wild'?genWild:genDun)(); }
 
@@ -1055,7 +1071,8 @@ function boot(){
   setMode(M.mode||'wild'); const vb=document.getElementById('view'); vb.textContent=(M.view==='gm'?'GM view':'Player view'); vb.classList.toggle('on',M.view==='player'); if(params.has('player'))setView('player');
   if(params.has('gw')||params.has('gd')){   // dev sample-map links must not clobber the user's autosave: stash it, generate, restore
     let stash=null; try{ stash=localStorage.getItem('osrmap'); }catch(e){}
-    if(params.has('gw')){setMode('wild');genWild();} else {setMode('dun');genDun();}
+    const seed=params.get('seed');   // ?gw&seed=abc / ?gd&seed=abc reproduce a specific map
+    if(params.has('gw')){setMode('wild');genWild(seed);} else {setMode('dun');genDun(seed);}
     try{ if(stash!=null)localStorage.setItem('osrmap',stash); else localStorage.removeItem('osrmap'); }catch(e){}
   }
   if(params.has('dev'))window.MM=M;

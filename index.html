@@ -960,6 +960,12 @@ function genDun(seedArg){
   const DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
   const roomAt=(c,r)=>{ for(let i=0;i<rooms.length;i++){const m=rooms[i]; if(c>=m.x&&c<m.x+m.w&&r>=m.y&&r<m.y+m.h)return i;} return -1; };
   const isCorr=(c,r)=>M.cells[c+','+r]==='floor'&&roomAt(c,r)===-1, isFloor=(c,r)=>M.cells[c+','+r]==='floor';
+  // A door belongs only in a real 1-cell doorway: the opening between inside (c,r) and outside (oc,or) must be
+  // flanked by an actual wall on BOTH perpendicular sides. A wall exists on the boundary edge one step along the
+  // wall line iff exactly one of the two cells straddling it is floor (mirrors drawDun's floor/rock boundary walls).
+  const doorFlanked=(c,r,oc,or)=>{ const pc=(or!==r)?1:0, pr=(oc!==c)?1:0;   // perpendicular to the passage direction
+    const wall=s=>isFloor(c+s*pc,r+s*pr)!==isFloor(oc+s*pc,or+s*pr);          // boundary edge s cells along the wall line is a wall?
+    return wall(1)&&wall(-1); };
   const doorMouth=new Set();   // room-edge cells that carry a door → keep symbols off them
   let farI=0;                  // farthest room from the entrance — gets the down-stair, skipped for features
 
@@ -1023,8 +1029,10 @@ function genDun(seedArg){
   const take=(c,r)=>{ occupied.add(c+','+r); return cc(c,r); };
 
   function placeDoors(){
-    // DOORWAYS: a room-perimeter floor cell whose adjacent OUTSIDE cell is a corridor (floor, not in any room).
-    // Group consecutive ones per side → one door, flanked by wall (corridors are 1-wide). Variety on ~18%.
+    // DOORWAYS: a room-perimeter floor cell whose adjacent OUTSIDE cell is a corridor (floor, not in any room)
+    // AND whose 1-cell opening is flanked by wall on BOTH perpendicular sides (see doorFlanked) — so the door
+    // glyph always lands in a real wall gap, never floating in open floor where a corridor runs flush/parallel.
+    // Group consecutive doorway cells per side → one door (corridors are 1-wide so runs are length 1). Variety ~18%.
     const SPECIAL=['DoorArchway1x1','DoorLocked1x1','DoorPortcullis1x1','DoorSecret1x1','DoorDouble1x1'].filter(n=>BY.dungeon[n]);
     for(const m of rooms){ const sides=[
         {cells:Array.from({length:m.w},(_,i)=>[m.x+i,m.y]),       out:(c,r)=>[c,r-1], rot:0},
@@ -1034,7 +1042,7 @@ function genDun(seedArg){
       for(const side of sides){ let run=[];
         const flush=()=>{ if(run.length){ const e=run[Math.floor(run.length/2)], [oc,or]=side.out(e[0],e[1]), p=cc((e[0]+oc)/2,(e[1]+or)/2);
             M.syms.push({x:p[0],y:p[1],icon:(rndf()<0.18&&SPECIAL.length?pick(SPECIAL):(BY.dungeon['Door1x1']?'Door1x1':SPECIAL[0])),rot:side.rot}); doorMouth.add(e[0]+','+e[1]); } run=[]; };
-        for(const[c,r]of side.cells){ const[oc,or]=side.out(c,r); if(isFloor(c,r)&&isCorr(oc,or)&&isFloor(2*oc-c,2*or-r)) run.push([c,r]); else flush(); } flush(); } } }   // require the corridor to continue a second cell out → no doors onto tangent corridors
+        for(const[c,r]of side.cells){ const[oc,or]=side.out(c,r); if(isFloor(c,r)&&isCorr(oc,or)&&doorFlanked(c,r,oc,or)) run.push([c,r]); else flush(); } flush(); } } }   // door only in a genuine 1-cell doorway flanked by wall on both sides — kills doors onto flush/parallel/wide-mouth corridors
 
   function placeStairs(){
     let fd=-1; rooms.forEach((m,i)=>{const d=(cx(m)-cx(rooms[0]))**2+(cy(m)-cy(rooms[0]))**2; if(d>fd){fd=d;farI=i;}});   // farthest room gets the down-stair
@@ -1053,9 +1061,12 @@ function genDun(seedArg){
 
   function addDeadEnds(){   // dead-end passages: maze fills with many; 'keep'/'some' add a few; 'trim all' adds none. After doorways so stubs never spawn doors/symbol conflicts.
     const cnt = O.corridors==='maze'?Math.round(nroom*1.6) : O.deadends==='keep'?Math.round(nroom*1.1) : O.deadends==='some'?Math.round(nroom*0.45) : 0;
+    // keep dead-end stubs off every doorway's flanks: carving a flank cell to floor would erase the wall beside a
+    // placed door, leaving it floating. Protect a 1-cell (incl. diagonal) halo around each door mouth.
+    const doorHalo=new Set(); for(const k of doorMouth){ const[c,r]=k.split(',').map(Number); for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++) doorHalo.add((c+dc)+','+(r+dr)); }
     const corr=[]; for(const k in M.cells){ const[c,r]=k.split(',').map(Number); if(M.cells[k]==='floor'&&roomAt(c,r)===-1) corr.push([c,r]); }
     for(let i=0;i<cnt&&corr.length;i++){ let[c,r]=pick(corr), d=pick(DIRS), len=2+rnd(4);
-      for(let s=0;s<len;s++){ const nc=c+d[0],nr=r+d[1]; if(nc<1||nr<1||nc>=cols-1||nr>=rows-1||roomAt(nc,nr)!==-1||M.cells[nc+','+nr]==='floor'||RES.has(nc+','+nr))break; M.cells[nc+','+nr]='floor'; c=nc;r=nr; if(rndf()<0.35)d=pick(DIRS); } } }
+      for(let s=0;s<len;s++){ const nc=c+d[0],nr=r+d[1]; if(nc<1||nr<1||nc>=cols-1||nr>=rows-1||roomAt(nc,nr)!==-1||M.cells[nc+','+nr]==='floor'||RES.has(nc+','+nr)||doorHalo.has(nc+','+nr))break; M.cells[nc+','+nr]='floor'; c=nc;r=nr; if(rndf()<0.35)d=pick(DIRS); } } }
 
   if(!placeRooms()){ render(); save(); commitChange(); return; }
   carveCorridors(); ensureConnected(); placeDoors(); placeStairs(); placeKeysAndFeatures(); addDeadEnds();
@@ -1092,11 +1103,26 @@ function runTests(){
       const seen=new Set([fl[0]]), st=[fl[0].split(',').map(Number)];
       while(st.length){ const[c,r]=st.pop(); for(const[dc,dr]of[[1,0],[-1,0],[0,1],[0,-1]]){ const nk=(c+dc)+','+(r+dr); if(M.cells[nk]==='floor'&&!seen.has(nk)){ seen.add(nk); st.push([c+dc,r+dr]); } } }
       return seen.size===fl.length; };
+    // checkDoor mirrors doorFlanked's geometry from a placed door sym's pixel position: recover the two cells that
+    // straddle the wall edge (one axis lands on an integer cell boundary), require both floor and both flanks walled.
+    const isFl=(c,r)=>M.cells[c+','+r]==='floor';
+    const checkDoor=(s)=>{ const L=layout(), gx=(s.x-L.ox)/L.cell, gy=(s.y-L.oy)/L.cell;
+      const horiz=Math.abs(gx-Math.round(gx))<0.01;   // vertical boundary (horizontal passage) → boundary column is integer
+      let a,b,pc,pr;
+      if(horiz){ const B=Math.round(gx), rr=Math.floor(gy); a=[B-1,rr]; b=[B,rr]; pc=0; pr=1; }
+      else { const B=Math.round(gy), cc2=Math.floor(gx); a=[cc2,B-1]; b=[cc2,B]; pc=1; pr=0; }
+      const wall=k=>isFl(a[0]+k*pc,a[1]+k*pr)!==isFl(b[0]+k*pc,b[1]+k*pr);
+      return isFl(a[0],a[1])&&isFl(b[0],b[1])&&wall(1)&&wall(-1); };
+    let doorTotal=0;
     for(let i=0;i<10;i++){ setMode('dun'); genDun(); const RESV=dunReserve(layout());
       for(const k of RESV) ok(M.cells[k]!=='floor','dun reserve is rock '+k);
       ok(M.syms.every(s=>typeof s.x==='number'&&typeof s.y==='number'),'dun syms have coords');
       ok(dunConnected(),'dun floors form a single connected component');
+      const doors=M.syms.filter(s=>/^Door/.test(s.icon||'')); doorTotal+=doors.length;
+      for(const s of doors) ok(checkDoor(s),'door sits in a real doorway flanked by rock @'+Math.round(s.x)+','+Math.round(s.y));
       let brd=false; for(const k in M.cells){ if(M.cells[k]!=='floor')continue; const[c,r]=k.split(',').map(Number); if(c===0||r===0||c===M.cols-1||r===M.rows-1){brd=true;break;} } ok(!brd,'no floor on the 1-cell border'); }
+    ok(doorTotal>0,'generation still places doors on normal 1-wide entries (total '+doorTotal+' over 10 dungeons)');
+    { let seededDoors=0; for(const sd of['door-a','door-b','door-c','door-d','door-e']){ setMode('dun'); genDun(sd); const dz=M.syms.filter(s=>/^Door/.test(s.icon||'')); seededDoors+=dz.length; for(const s of dz) ok(checkDoor(s),'seeded('+sd+') door flanked'); } ok(seededDoors>0,'seeded dungeons place doors (total '+seededDoors+')'); }
     // seeded determinism — a fixed seed reproduces the map; a different seed diverges (the seed itself isn't in stateStr)
     setMode('wild'); genWild('det-seed'); const w1=stateStr(); genWild('det-seed'); const w2=stateStr(); genWild('det-seed-2'); const w3=stateStr();
     ok(w1===w2,'genWild deterministic for a fixed seed'); ok(w1!==w3,'genWild differs across seeds');

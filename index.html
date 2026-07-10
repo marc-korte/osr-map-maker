@@ -440,16 +440,26 @@ function buildTools(){
     { const w=document.createElement('label'); w.className='num'; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode('Seed'));   // reproducible generation; blank = random each time
       const si=document.createElement('input'); si.type='text'; si.id=(M.mode==='dun'?'seedD':'seedW'); si.placeholder='blank = random'; si.value=(M.mode==='dun'?M.seedD:M.seedW)||''; si.style.cssText='flex:1;min-width:0;';
       si.onchange=()=>{ const v=si.value.trim(); if(M.mode==='dun')M.seedD=v; else M.seedW=v; save(); }; w.appendChild(si); a.appendChild(w); }
-    if(M.mode==='dun'){ M.dunOpts=Object.assign({density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'},M.dunOpts||{});   // donjon-style generate options
-      const mkSel=(key,label,vals)=>{ const w=document.createElement('label'); w.className='num'; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode(label));   // NB: named mkSel — a local `sel` would shadow the selected-symbol index
-        const s=document.createElement('select'); s.style.cssText='flex:1;background:#111;color:#eee;border:1px solid #555;border-radius:4px;padding:3px;font-size:12px;';
-        for(const[v,tt]of vals){ const o=document.createElement('option'); o.value=v; o.textContent=tt; if(M.dunOpts[key]===v)o.selected=true; s.appendChild(o); }
-        s.onchange=()=>{ M.dunOpts[key]=s.value; save(); }; w.appendChild(s); a.appendChild(w); };
+    const OPTS = M.mode==='dun'
+      ? (M.dunOpts=Object.assign({density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'},M.dunOpts||{}))   // donjon-style generate options
+      : (M.wildOpts=Object.assign({water:'normal',terrain:'normal',settlements:'some',features:'some',rivers:'some'},M.wildOpts||{}));
+    const mkSel=(key,label,vals)=>{ const w=document.createElement('label'); w.className='num'; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode(label));   // NB: named mkSel — a local `sel` would shadow the selected-symbol index
+      const s=document.createElement('select'); s.style.cssText='flex:1;background:#111;color:#eee;border:1px solid #555;border-radius:4px;padding:3px;font-size:12px;';
+      for(const[v,tt]of vals){ const o=document.createElement('option'); o.value=v; o.textContent=tt; if(OPTS[key]===v)o.selected=true; s.appendChild(o); }
+      s.onchange=()=>{ OPTS[key]=s.value; save(); }; w.appendChild(s); a.appendChild(w); };
+    if(M.mode==='dun'){
       mkSel('density','Density',[['sparse','Sparse'],['normal','Normal'],['dense','Dense'],['packed','Packed']]);
       mkSel('roomSize','Room size',[['small','Small'],['medium','Medium'],['large','Large']]);
       mkSel('corridors','Corridors',[['straight','Straight'],['winding','Winding'],['maze','Maze']]);
       mkSel('deadends','Dead-ends',[['all','Trim all'],['some','Trim some'],['keep','Keep all']]);
-      mkSel('stairs','Stairs',[['yes','Yes'],['no','No']]); }
+      mkSel('stairs','Stairs',[['yes','Yes'],['no','No']]);
+    } else {
+      mkSel('water','Water',[['dry','Dry'],['normal','Normal'],['wet','Wet'],['coastal','Coastal']]);
+      mkSel('terrain','Terrain',[['smooth','Smooth'],['normal','Normal'],['rugged','Rugged']]);
+      mkSel('settlements','Settlements',[['few','Few'],['some','Some'],['many','Many']]);
+      mkSel('features','Features',[['few','Few'],['some','Some'],['many','Many']]);
+      mkSel('rivers','Rivers',[['none','None'],['few','Few'],['some','Some'],['many','Many']]);
+    }
     const gen=document.createElement('button'); gen.textContent='Generate'; gen.style.cssText='width:100%;margin-top:6px;background:var(--hl);color:#111;font-weight:700;padding:8px;'; gen.onclick=doGenerate; a.appendChild(gen);
     const tip=document.createElement('div'); tip.style.cssText='font-size:11px;color:#999;margin:4px 0'; tip.textContent=(M.mode==='dun'?'Density fills large grids. ':'')+'Replaces the current map.'; a.appendChild(tip);
   }
@@ -632,7 +642,7 @@ function migrateMap(o){ o.v=SCHEMA_V; const D=JSON.parse(M0); let dropped=0;   /
   o.syms=filt(o.syms,s=>s&&num(s.x)&&num(s.y)); o.labels=filt(o.labels,l=>l&&num(l.x)&&num(l.y)); o.sites=filt(o.sites,s=>s&&num(s.c)&&num(s.r));
   for(const k in o.hex){ const h=o.hex[k]; if(!(typeof h==='string'||(h&&typeof h==='object'&&typeof h.n==='string'))){ delete o.hex[k]; dropped++; } }   // legendWild reads t.n on non-strings
   return dropped; }
-const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rowsW','colsD','rowsD','view','layers','hex','sites','roads','cells','syms','labels','drawsW','drawsD','curStyle','gridBg','snap','milesPerHex','feetPerSquare','dunOpts','seedW','seedD'];
+const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rowsW','colsD','rowsD','view','layers','hex','sites','roads','cells','syms','labels','drawsW','drawsD','curStyle','gridBg','snap','milesPerHex','feetPerSquare','dunOpts','wildOpts','seedW','seedD'];
 function applyMap(o){ const D=JSON.parse(M0); for(const k of MAP_KEYS) M[k]=(o[k]!==undefined)?o[k]:D[k]; }   // whitelist: keys absent in the save reset to defaults (no leftovers from the previous map)
 function loadMapObj(o){ if(o.v>SCHEMA_V) showBanner('This map was saved by a newer version of OSR Map Maker — loading anyway.');
   const dropped=migrateMap(o); applyMap(o);
@@ -804,25 +814,29 @@ function genWild(seedArg){
   beginChange(); M.hex={}; M.sites=[]; M.roads=[]; M.drawsW=[]; selHex=null;
   M.title=M.titleW=genRegionName(); { const ti=document.getElementById('title'); if(ti)ti.value=M.title; }   // fresh region name each generate
   const cols=M.cols, rows=M.rows, L=layout(), RES=legendReserveWild(L);   // key footprint kept content-free (ruler lives in the bottom margin)
+  const O=Object.assign({water:'normal',terrain:'normal',settlements:'some',features:'some',rivers:'some'},M.wildOpts||{});   // generate options
+  const waterF={dry:0,normal:1,wet:2,coastal:2.5}[O.water], passF={smooth:3,normal:2,rugged:1}[O.terrain], cntF={few:0.5,some:1,many:1.8}, featCap={few:2,some:4,many:7}[O.features];
   const g={}, settle=[];   // working terrain grid + settlement hexes, shared across the phases below
 
   function seedTerrain(){   // Voronoi-ish jittered nearest-seed fill (terrain + water + blank seeds)
     const base=['Grassland','Grassland','Forest','Forest','Hills','Mountains','Swamp','Desert','Evergreen','Badlands','ForestedHills','Jungle'];
     const seeds=[];
-    const nseed=Math.max(4,Math.round(cols*rows/9));
+    const nseed=Math.max(4,Math.round(cols*rows/(O.terrain==='rugged'?6:9)));   // rugged = denser seeds → more, smaller terrain patches
     for(let i=0;i<nseed;i++){const c=rnd(cols),r=rnd(rows),[x,y]=hcenter(c,r,L); seeds.push({x,y,t:pick(base)});}
-    for(let i=0;i<Math.max(1,Math.round(nseed/6));i++){const c=rnd(cols),r=rnd(rows),[x,y]=hcenter(c,r,L); seeds.push({x,y,t:'Water'});}
+    const nwater=Math.round(Math.max(1,nseed/6)*waterF);   // water scales lake seeds (dry=0)
+    for(let i=0;i<nwater;i++){const c=rnd(cols),r=rnd(rows),[x,y]=hcenter(c,r,L); seeds.push({x,y,t:'Water'});}
     for(let i=0;i<Math.max(2,Math.round(nseed/4));i++){const c=rnd(cols),r=rnd(rows),[x,y]=hcenter(c,r,L); seeds.push({x,y,t:'Blank'});}   // always leave open / unexplored hexes
     for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ const[x,y]=hcenter(c,r,L); let bt=seeds[0].t,bd=1e18; for(const s of seeds){const jx=s.x+(rndf()-.5)*L.hw*.7, jy=s.y+(rndf()-.5)*L.hw*.7, d=(x-jx)**2+(y-jy)**2; if(d<bd){bd=d;bt=s.t;}} g[c+','+r]=bt; } }
 
   function smoothTerrain(){   // majority-vote passes, then hills where grassland/badlands meets mountains
-    for(let pass=0;pass<2;pass++){ const ng={}; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ const cnt={}; for(const[nc,nr]of hexNbrs(c,r)){const t=g[nc+','+nr]; cnt[t]=(cnt[t]||0)+1;} let mt=g[c+','+r],mc=0; for(const t in cnt)if(cnt[t]>mc){mc=cnt[t];mt=t;} ng[c+','+r]=mc>=4?mt:g[c+','+r]; } Object.assign(g,ng); }
+    for(let pass=0;pass<passF;pass++){ const ng={}; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ const cnt={}; for(const[nc,nr]of hexNbrs(c,r)){const t=g[nc+','+nr]; cnt[t]=(cnt[t]||0)+1;} let mt=g[c+','+r],mc=0; for(const t in cnt)if(cnt[t]>mc){mc=cnt[t];mt=t;} ng[c+','+r]=mc>=4?mt:g[c+','+r]; } Object.assign(g,ng); }
     for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ if((g[c+','+r]==='Grassland'||g[c+','+r]==='Badlands')&&hexNbrs(c,r).some(([nc,nr])=>g[nc+','+nr]==='Mountains')&&rndf()<.5) g[c+','+r]='Hills'; } }
 
   // OCEAN: only at a large geographic span (cols × miles/hex). < ~150 mi = landlocked (lakes only); a wiggly coast
   // floods in from an edge, depth scaling with span; a second, shallower coast appears past ~600 mi.
-  function floodOcean(){ const span=Math.max(cols,rows)*(M.milesPerHex||1);
-    if(span>=150){ const base=0.10+0.35*Math.min(1,(span-150)/600), allE=['N','S','E','W'];
+  function floodOcean(){ if(O.water==='dry')return;   // dry = landlocked (lakes only, no sea)
+    const span=Math.max(cols,rows)*(M.milesPerHex||1), coastal=O.water==='coastal';
+    if(coastal||span>=150){ const eff=Math.max(span,150), base=(coastal?0.16:0.10)+0.35*Math.min(1,(eff-150)/600), allE=['N','S','E','W'];   // coastal forces a sea even on small maps
       const coasts=[{edge:pick(allE),depth:base}];
       if(span>=600){ coasts.push({edge:pick(allE.filter(e=>e!==coasts[0].edge)),depth:base*0.5}); }
       for(const{edge,depth}of coasts){ const ph=rndf()*6.283;
@@ -838,12 +852,13 @@ function genWild(seedArg){
 
   function placeSettlements(){
     const goodSet=(c,r)=>['Grassland','Hills','Forest','Evergreen','ForestedHills'].includes(g[c+','+r])&&!RES.has(c+','+r);
-    const nset=Math.min(5,Math.max(2,Math.round(cols*rows/40))); let t=0;
+    const nset=Math.max(1,Math.round(Math.min(5,Math.max(2,Math.round(cols*rows/40)))*cntF[O.settlements])); let t=0;   // settlements scales town count
     while(settle.length<nset && t++<300){ const c=rnd(cols),r=rnd(rows); if(!goodSet(c,r)||settle.some(s=>Math.abs(s[0]-c)+Math.abs(s[1]-r)<3))continue; settle.push([c,r]); M.hex[c+','+r]= settle.length===1?'Castle':pick(['Town','Village','Village','Tower']); M.sites.push({c,r,label:genPlaceName(),kind:'place'}); } }
 
   function placeFeatures(){   // scatter features BEFORE routing so roads/rivers can curve around them too
     const feats=[['Ruins',['Grassland','Hills','Forest','Badlands','ForestedHills']],['Cave',['Hills','Mountains','EvergreenMountains','ForestedMountains']],['StandingStones',['Grassland','Badlands','Hills']],['Tower',['Hills','Grassland','ForestedHills']],['Tomb',['Hills','Badlands','Grassland']],['Mine',['Hills','Mountains','EvergreenMountains','ForestedMountains','SnowMountains']]];
-    let ft=0,fp=0; while(fp<4 && ft++<300){ const c=rnd(cols),r=rnd(rows),cur=g[c+','+r],f=pick(feats); if(f[1].includes(cur)&&!settle.some(s=>s[0]===c&&s[1]===r)&&!M.sites.some(s=>s.c===c&&s.r===r)){M.hex[c+','+r]=f[0]; M.sites.push({c,r,label:genFeatureName(f[0]),kind:'place'}); fp++;} } }
+    // features caps the scatter count {few:2, some:4, many:7}
+    let ft=0,fp=0; while(fp<featCap && ft++<300){ const c=rnd(cols),r=rnd(rows),cur=g[c+','+r],f=pick(feats); if(f[1].includes(cur)&&!settle.some(s=>s[0]===c&&s[1]===r)&&!M.sites.some(s=>s.c===c&&s.r===r)){M.hex[c+','+r]=f[0]; M.sites.push({c,r,label:genFeatureName(f[0]),kind:'place'}); fp++;} } }
 
   function buildRoads(){   // minimum spanning tree over settlements, each edge routed hex-by-hex around mountains/water
     const rcost=(c,r)=>{ if(RES.has(c+','+r))return 4000; const tt=g[c+','+r];   // roads route around the reserved key footprint
@@ -873,7 +888,7 @@ function genWild(seedArg){
     const waters=[]; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) if(g[c+','+r]==='Water') waters.push([c,r]);
     const rcostR=(c,r)=>{ if(RES.has(c+','+r))return 4000; const tt=g[c+','+r]; return tt==='Water'?0.15:1+elevOf(tt)*0.6; };       // rivers also avoid the reserved key footprint
     if(hi.length){ hi.sort((a,b)=>b[2]-a[2]);                                                       // more, spaced rivers on bigger maps; each runs source → nearest sea
-      const nriv=Math.min(6,Math.max(1,Math.round(cols*rows/350))), used=[], minSep=Math.max(3,Math.max(cols,rows)*0.18);
+      const nriv=Math.max(1,Math.round(Math.min(6,Math.max(1,Math.round(cols*rows/350)))*cntF[O.rivers])), used=[], minSep=Math.max(3,Math.max(cols,rows)*0.18);   // rivers scales count ('none' skips the phase entirely)
       for(let ri=0; ri<hi.length && used.length<nriv; ri++){ const src=hi[ri];
         if(used.some(u=>Math.abs(u[0]-src[0])+Math.abs(u[1]-src[1])<minSep)) continue;
         let tgt=null,bd=1e18;
@@ -901,7 +916,7 @@ function genWild(seedArg){
       M.sites.push({c:best[0],r:best[1],label,kind:'place',water:true}); } }
 
   seedTerrain(); smoothTerrain(); floodOcean(); commitTerrain();
-  placeSettlements(); placeFeatures(); buildRoads(); carveRivers(); nameWaters();
+  placeSettlements(); placeFeatures(); buildRoads(); if(O.rivers!=='none')carveRivers(); nameWaters();
   M.sites=M.sites.filter(s=>!RES.has(s.c+','+s.r));   // safety: nothing labeled under the key
   render(); maybeFit(); save(); commitChange();
   } finally { _rng=Math.random; }   // seeding must never leak into later non-generation randomness

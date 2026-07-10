@@ -321,7 +321,7 @@ function drawGhost(){ if(hoverX==null)return; const L=layout(); ctx.save(); ctx.
   if(M.mode==='dun'){
     if(tool==='stamp'&&curIcon&&pickCell(hoverX,hoverY,L)){ const[tw,th]=tiles(curIcon),[sx,sy]=snapPt(hoverX,hoverY,L); drawIconT(ctx,'dungeon',curIcon,sx,sy,L.cell*tw*0.96,L.cell*th*0.96,stampT); }
     else if(tool==='floor'||tool==='rock'){ const c=pickCell(hoverX,hoverY,L); if(c){ ctx.globalAlpha=0.3; ctx.fillStyle=(tool==='floor'?'#2a7':'#b33'); ctx.fillRect(L.ox+c[0]*L.cell,L.oy+c[1]*L.cell,L.cell,L.cell);} }
-    else if(tool==='key'){ disc(ctx,hoverX,hoverY,11,INK); }
+    else if(tool==='key'&&pickCell(hoverX,hoverY,L)){ const[sx,sy]=snapPt(hoverX,hoverY,L); disc(ctx,sx,sy,11,INK); }
   } else if(M.mode==='wild'){
     if(tool==='terrain'&&curIcon){ const hx=pickHex(hoverX,hoverY,L); if(hx){const[x,y]=hcenter(hx[0],hx[1],L); drawIconT(ctx,'hex',curIcon,x,y,L.size*1.68,L.size*1.52,stampT);} }
     else if(tool==='borderedge'){ const e=nearestEdge(hoverX,hoverY,L); if(e){ ctx.globalAlpha=0.85; ctx.strokeStyle=SEL; ctx.lineWidth=4; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(e.a[0],e.a[1]); ctx.lineTo(e.b[0],e.b[1]); ctx.stroke(); } }
@@ -399,8 +399,7 @@ function drawDun(g,W,H){
     if(M.cells[(c-1)+','+r]!=='floor')line(g,x,y,x,y+L.cell,2.4); if(M.cells[(c+1)+','+r]!=='floor')line(g,x+L.cell,y,x+L.cell,y+L.cell,2.4); }
   g.strokeStyle=INK;g.lineWidth=2.6;g.strokeRect(x0,y0,x1-x0,y1-y0);
   }
-  let kn=0; M.syms.forEach(s=>{ if(s.type==='key'){kn++; s.n=kn;} });
-  M.syms.forEach((s,i)=>{ const isKey=s.type==='key'; const on=(isKey?lyr('keys'):lyr('symbols'))&&og(s); if(!on)return; if(isKey){ const t=String(s.n||'#'), kr=t.length>1?11:10; disc(g,s.x,s.y,kr,INK); txt(g,s.x,s.y,t,kr*1.05,true,PAP); } else { const[tw,th]=tiles(s.icon); drawIconT(g,'dungeon',s.icon,s.x,s.y,L.cell*tw*0.96,L.cell*th*0.96,s); } if(s.gm)gmDot(g,s.x+L.cell*0.5,s.y-L.cell*0.5); if(i===sel){ g.save(); g.setLineDash([5,4]); g.strokeStyle=SEL; g.lineWidth=2; g.strokeRect(s.x-L.cell*0.62,s.y-L.cell*0.62,L.cell*1.24,L.cell*1.24); g.restore(); } });
+  let kn=0; M.syms.forEach((s,i)=>{ const isKey=s.type==='key', n=isKey?++kn:0; const on=(isKey?lyr('keys'):lyr('symbols'))&&og(s); if(!on)return; if(isKey){ const t=String(n||'#'), kr=t.length>1?11:10; disc(g,s.x,s.y,kr,INK); txt(g,s.x,s.y,t,kr*1.05,true,PAP); } else { const[tw,th]=tiles(s.icon); drawIconT(g,'dungeon',s.icon,s.x,s.y,L.cell*tw*0.96,L.cell*th*0.96,s); } if(s.gm)gmDot(g,s.x+L.cell*0.5,s.y-L.cell*0.5); if(i===sel){ g.save(); g.setLineDash([5,4]); g.strokeStyle=SEL; g.lineWidth=2; g.strokeRect(s.x-L.cell*0.62,s.y-L.cell*0.62,L.cell*1.24,L.cell*1.24); g.restore(); } });
   if(lyr('text')) for(const l of M.labels){ if(!og(l))continue; haloTxt(g,l.x,l.y,l.text,false,13); if(l.gm)gmDot(g,l.x,l.y-12); }
   if(lyr('lines')){ drawStrokeList(g,M.drawsD); if(curStroke&&M.mode==='dun') drawStroke(g,curStroke); }
   cartouche(g,W/2,52,M.title); compass(g,W-78,150);
@@ -522,7 +521,9 @@ function toolBorderEdge(px,py,first,L){ const e=nearestEdge(px,py,L); if(!e)retu
 function toolPaintHex(px,py,first,L){ const hx=pickHex(px,py,L); if(!hx)return; const k=hx[0]+','+hx[1];
   if(tool==='erasehex')delete M.hex[k]; else if(tool==='water')M.hex[k]='Water'; else M.hex[k]={n:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}; }
 function toolPaintCell(px,py,first,L){ const c=pickCell(px,py,L); if(!c)return;
-  if(tool==='floor')M.cells[c[0]+','+c[1]]='floor'; else delete M.cells[c[0]+','+c[1]]; }
+  if(tool==='floor')M.cells[c[0]+','+c[1]]='floor';
+  else{ delete M.cells[c[0]+','+c[1]]; const same=o=>{ const oc=pickCell(o.x,o.y,L); return oc&&oc[0]===c[0]&&oc[1]===c[1]; };   // Rock clears the cell fully, incl. any symbol/label on it
+    M.syms=M.syms.filter(s=>!same(s)); M.labels=M.labels.filter(l=>!same(l)); sel=-1; } }
 function toolSelectWild(px,py,first,L){
   if(first){ selHex=null; selDraw=-1; selSite=-1; dragging=null; dragPrev={x:px,y:py};
     const bi=nearestIdx(M.sites,px,py,PICK_SITE2,s=>hcenter(s.c,s.r,L));
@@ -543,10 +544,10 @@ function toolSite(px,py,first,L){ const hx=pickHex(px,py,L); if(!hx)return; cons
   const label=prompt(ex&&ex.kind==='place'?'Place name:':'Site label (e.g. Hush Road):', ex?ex.label:'');
   if(label!==null){ M.sites=M.sites.filter(s=>!(s.c===hx[0]&&s.r===hx[1])); M.sites.push({c:hx[0],r:hx[1],label:label||'',...(ex&&ex.kind==='place'?{kind:'place'}:{})}); } }
 function toolLabel(px,py){ const t=prompt('Label text:',''); if(t)M.labels.push({x:px,y:py,text:t}); }
-function toolKey(px,py,first,L){ const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,type:'key'}); sel=M.syms.length-1; buildTools(); }
+function toolKey(px,py,first,L){ if(!pickCell(px,py,L))return; const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,type:'key'}); sel=M.syms.length-1; buildTools(); }
 function toolEraseSym(px,py){ const bi=nearestIdx(M.syms,px,py,PICK_SYM2,s=>[s.x,s.y]); if(bi>=0)M.syms.splice(bi,1);
   else{ let li=-1; M.labels.forEach((l,i)=>{if((l.x-px)**2+(l.y-py)**2<PICK_SYM2)li=i;}); if(li>=0)M.labels.splice(li,1); } sel=-1; buildTools(); }
-function toolStamp(px,py,first,L){ const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,icon:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}); sel=M.syms.length-1; buildTools(); }
+function toolStamp(px,py,first,L){ if(!pickCell(px,py,L))return; const[sx,sy]=snapPt(px,py,L); M.syms.push({x:sx,y:sy,icon:curIcon,rot:stampT.rot,fx:stampT.fx,fy:stampT.fy,inv:stampT.inv}); sel=M.syms.length-1; buildTools(); }
 const HANDLERS={
   any:{drawriver:toolStroke,drawroad:toolStroke,drawtrail:toolStroke,drawborder:toolStroke,eraseline:toolEraseLine,borderedge:toolBorderEdge},
   wild:{terrain:toolPaintHex,water:toolPaintHex,erasehex:toolPaintHex,select:toolSelectWild,site:toolSite},

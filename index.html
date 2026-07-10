@@ -366,7 +366,7 @@ function drawWild(g,W,H){
 // (see legendReserveWild) so no terrain/sites are ever placed under the key.
 function legendAnchorWild(L){ const fieldR=L.ox+L.hw*M.cols; return {x:fieldR-14-LEG_W, y:scalebarAnchorWild(L).y+9-LEG_H}; }   // bottom of the key lines up with the bottom of the ruler's scale bar
 // hex keys whose cell touches the reserved key footprint → blanked & kept content-free at generation.
-function legendReserveWild(L){ const a=legendAnchorWild(L); return reserveHexes(L,a.x,a.y,LEG_W,LEG_H); }
+function legendReserveWild(L){ const a=legendAnchorWild(L), set=reserveHexes(L,a.x,a.y,LEG_W,LEG_H); return (M.cols*M.rows-set.size)<16?new Set():set; }   // sub-min map: skip the reserve so the key overlays content instead of blanking generation
 // scalebar (ruler): in the bottom margin, just below the hex field.
 function scalebarAnchorWild(L){ const fieldL=L.ox-L.hw*0.5, fieldB=L.oy+1.5*L.size*(M.rows-1)+L.size; return {x:fieldL+14, y:fieldB+24}; }
 // hex keys whose cell touches a pixel rect → blanked & kept content-free at generation.
@@ -407,19 +407,20 @@ function drawDun(g,W,H){
   // key + scale note sit ON the map (over rock reserved & kept clear at generation), bottoms aligned near the frame floor
   const a=legendAnchorDun(L);
   legendDun(g, a.x, a.y);
-  { const lab='1 square = '+fmtScale(M.feetPerSquare||10)+' ft', rb=rulerRectDun(L);   // scale note only (no ruler bar), on a paper chip so it reads over rock/grid
-    g.font='italic 13px Georgia,serif'; const tw=g.measureText(lab).width;   // same font txt() uses for non-bold
-    g.fillStyle=PAP; g.fillRect(rb.x, rb.y, tw+16, rb.h);
+  { const lab=dunRulerLabel(), rb=rulerRectDun(L);   // scale note only (no ruler bar), on a paper chip so it reads over rock/grid
+    g.fillStyle=PAP; g.fillRect(rb.x, rb.y, rb.w, rb.h);
     txt(g, rb.x+8, rb.y+rb.h/2, lab, 13, false, INK, 'left'); }
 }
 // in-frame anchors for the key (bottom-right) + reserved footprints (see dunReserve). Fixed LEG_H so the
 // reserve is stable regardless of which symbols the generator ends up placing.
 function legendAnchorDun(L){ const x1=L.ox+M.cols*L.cell, y1=L.oy+M.rows*L.cell; return {x:x1-14-LEG_W, y:y1-14-LEG_H}; }
-function rulerRectDun(L){ const y1=L.oy+M.rows*L.cell; return {x:L.ox+14, y:y1-40, w:150, h:24}; }   // scale-note chip footprint (bottom-left), reserved as rock at generation
+function dunRulerLabel(){ return '1 square = '+fmtScale(M.feetPerSquare||10)+' ft'; }
+function dunRulerW(){ ctx.save(); ctx.font='italic 13px Georgia,serif'; const w=ctx.measureText(dunRulerLabel()).width; ctx.restore(); return Math.max(120,w+16); }
+function rulerRectDun(L){ const y1=L.oy+M.rows*L.cell; return {x:L.ox+14, y:y1-40, w:dunRulerW(), h:24}; }   // scale-note chip footprint (bottom-left), reserved as rock at generation
 function dunReserve(L){ const a=legendAnchorDun(L), rb=rulerRectDun(L), boxes=[[a.x,a.y,LEG_W,LEG_H],[rb.x,rb.y,rb.w,rb.h]], set=new Set();
   for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const cx=L.ox+c*L.cell, cy=L.oy+r*L.cell;
     for(const[bx,by,bw,bh] of boxes){ if(cx+L.cell>bx && cx<bx+bw && cy+L.cell>by && cy<by+bh){ set.add(c+','+r); break; } } }
-  return set; }
+  return (M.cols*M.rows-set.size)<24?new Set():set; }
 function legendDun(g,ax,ay){
   const used=[...new Set(M.syms.filter(s=>s.type!=='key').map(s=>s.icon))].slice(0,7);
   const rows=used.map(n=>[(px,py)=>drawIcon(g,'dungeon',n,px,py,30,30),(BY.dungeon[n]?BY.dungeon[n].label:n)]);

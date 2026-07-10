@@ -130,7 +130,7 @@ const SCHEMA_V=2;   // save-file schema version; absent v = v1 (everything shipp
 const M={ v:SCHEMA_V, mode:'wild', title:'THE HUSH', titleW:'THE HUSH', titleD:'THE DUNGEON',
   cols:9, rows:12, colsW:9, rowsW:12, colsD:28, rowsD:36, view:'gm',
   layers:[{id:'terrain',label:'Terrain',vis:true,gm:false},{id:'lines',label:'Lines',vis:true,gm:false},{id:'symbols',label:'Symbols',vis:true,gm:false},{id:'keys',label:'Keys',vis:true,gm:false},{id:'text',label:'Text',vis:true,gm:false}],
-  hex:{}, sites:[], roads:[], cells:{}, syms:[], labels:[], drawsW:[], drawsD:[], curRoad:null, curStyle:'road', gridBg:true, snap:true, milesPerHex:1, feetPerSquare:10 };
+  hex:{}, sites:[], roads:[], cells:{}, syms:[], labels:[], drawsW:[], drawsD:[], curStyle:'road', gridBg:true, snap:true, milesPerHex:1, feetPerSquare:10 };
 const M0=JSON.stringify(M);   // pristine defaults — loads fill/reset missing fields from this
 let tool='terrain', curIcon='Forest', filter='';
 let stampT={rot:0,fx:false,fy:false,inv:false};   // transform for new/selected stamps
@@ -339,7 +339,7 @@ function drawWild(g,W,H){
   const L=layout();
   for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const[x,y]=hcenter(c,r,L); if(!inCull(x,y))continue; poly(g,hcorners(x,y,L.size),null,GRID,1); }
   // roads/rivers under the terrain symbols: they stay continuous and the symbols sit cleanly on top (not overprinted)
-  if(lyr('lines')){ for(const[pts,style]of M.roads) drawRoute(g,pts.map(p=>hcenter(p[0],p[1],L)),style); if(M.curRoad) drawRoute(g,M.curRoad.map(p=>hcenter(p[0],p[1],L)),M.curStyle);
+  if(lyr('lines')){ for(const[pts,style]of M.roads) drawRoute(g,pts.map(p=>hcenter(p[0],p[1],L)),style);
     drawStrokeList(g,M.drawsW,d=>d.kind!=='road'); if(curStroke&&M.mode==='wild') drawStroke(g,curStroke); }   // rivers/trails/borders under terrain; roads drawn on top below
   if(lyr('terrain')) for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const key=c+','+r,t=M.hex[key]; if(!t||!og(t))continue; const[x,y]=hcenter(c,r,L); if(!inCull(x,y))continue; const name=(typeof t==='string')?t:t.n;
     if(name==='Water'){ poly(g,hcorners(x,y,L.size),WATERC,GRID,1); if(t&&t.gm)gmDot(g,x+L.size*0.66,y-L.size*0.66); continue; }   // water = solid grey hex
@@ -495,7 +495,7 @@ function mapsPanel(a){
   const sv=document.createElement('button'); sv.textContent='Save as…'; sv.style.cssText='margin-top:4px;'; sv.onclick=slotSaveAs; a.appendChild(sv);
   const note=document.createElement('div'); note.style.cssText='font-size:11px;color:#999;margin-top:4px'; note.textContent='Snapshots kept in this browser. The working map autosaves separately.'; a.appendChild(note);
 }
-function setMode(m){ M.mode=m; commitRoad(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; borderLast=null; dragging=null; curStroke=null;
+function setMode(m){ M.mode=m; sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; borderLast=null; dragging=null; curStroke=null;
   const tw=document.getElementById('tabWild'),td=document.getElementById('tabDun'); tw.classList.toggle('on',m==='wild'); td.classList.toggle('on',m==='dun'); press(tw,m==='wild'); press(td,m==='dun');
   tool=(m==='wild'?'terrain':'stamp'); curIcon=(m==='wild'?'Forest':(ICONS.dungeon[0]||{}).n||'Door1x1');
   M.cols=(m==='wild'?M.colsW:M.colsD); M.rows=(m==='wild'?M.rowsW:M.rowsD); filter='';   // filter is dungeon-only; drop it so a stale term doesn't hide the wild palette
@@ -560,7 +560,6 @@ function apply(px,py,first){
   if(h)h(px,py,first,layout());
   render();
 }
-function commitRoad(){ if(M.curRoad&&M.curRoad.length>1)M.roads.push([M.curRoad,M.curStyle||'road']); M.curRoad=null; render(); save(); }
 let dragging=null;
 function applyT(kind){ beginChange(); const t=tT(); if(kind==='rot')t.rot=((t.rot||0)+90)%360; else t[kind]=!t[kind]; sync(); commitChange(); }
 // Pointer Events unify mouse / pen / touch. Two simultaneous pointers = pinch-zoom + pan.
@@ -590,7 +589,7 @@ function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2){ pinching=false; p
 cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse'){hoverX=hoverY=null;render();} });
-window.addEventListener('keydown',e=>{ if(e.key==='Escape'){commitRoad();curStroke=null;sel=-1;selHex=null;selDraw=-1;selLabel=-1;selSite=-1;dragging=null;buildTools();render();}
+window.addEventListener('keydown',e=>{ if(e.key==='Escape'){curStroke=null;sel=-1;selHex=null;selDraw=-1;selLabel=-1;selSite=-1;dragging=null;buildTools();render();}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault(); if(e.shiftKey)redo(); else undo(); return;}   // toLowerCase: Shift makes e.key 'Z'
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo();return;}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();document.getElementById('save').onclick();return;}   // Ctrl+S = download .json, not the browser save-page dialog
@@ -630,7 +629,7 @@ function migrateMap(o){ o.v=SCHEMA_V; const D=JSON.parse(M0); let dropped=0;   /
   o.syms=filt(o.syms,s=>s&&num(s.x)&&num(s.y)); o.labels=filt(o.labels,l=>l&&num(l.x)&&num(l.y)); o.sites=filt(o.sites,s=>s&&num(s.c)&&num(s.r));
   for(const k in o.hex){ const h=o.hex[k]; if(!(typeof h==='string'||(h&&typeof h==='object'&&typeof h.n==='string'))){ delete o.hex[k]; dropped++; } }   // legendWild reads t.n on non-strings
   return dropped; }
-const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rowsW','colsD','rowsD','view','layers','hex','sites','roads','cells','syms','labels','drawsW','drawsD','curRoad','curStyle','gridBg','snap','milesPerHex','feetPerSquare','dunOpts'];
+const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rowsW','colsD','rowsD','view','layers','hex','sites','roads','cells','syms','labels','drawsW','drawsD','curStyle','gridBg','snap','milesPerHex','feetPerSquare','dunOpts'];
 function applyMap(o){ const D=JSON.parse(M0); for(const k of MAP_KEYS) M[k]=(o[k]!==undefined)?o[k]:D[k]; }   // whitelist: keys absent in the save reset to defaults (no leftovers from the previous map)
 function loadMapObj(o){ if(o.v>SCHEMA_V) showBanner('This map was saved by a newer version of OSR Map Maker — loading anyway.');
   const dropped=migrateMap(o); applyMap(o);
@@ -676,7 +675,7 @@ document.getElementById('tabWild').onclick=()=>setMode('wild');
 document.getElementById('tabDun').onclick=()=>setMode('dun');
 document.getElementById('undo').onclick=undo;
 document.getElementById('redo').onclick=redo;
-document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; beginChange(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.curRoad=null;M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); commitChange(); };
+document.getElementById('clear').onclick=()=>{ if(!confirm('Clear this map?'))return; beginChange(); sel=-1; selHex=null; selDraw=-1; selLabel=-1; selSite=-1; if(M.mode==='wild'){M.hex={};M.sites=[];M.roads=[];M.drawsW=[];}else{M.cells={};M.syms=[];M.labels=[];M.drawsD=[];} render(); save(); commitChange(); };
 function pruneOutOfBounds(){ const L=layout();   // resize can leave content past the new edge — drop it so it can't reappear on regrow or silently vanish from export
   for(const k in M.hex){ const p=k.split(',').map(Number); if(p[0]>=M.cols||p[1]>=M.rows)delete M.hex[k]; }
   for(const k in M.cells){ const p=k.split(',').map(Number); if(p[0]>=M.cols||p[1]>=M.rows)delete M.cells[k]; }

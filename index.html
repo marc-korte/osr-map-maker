@@ -589,11 +589,11 @@ function endPtr(e){ ptrs.delete(e.pointerId); if(ptrs.size<2){ pinching=false; p
 cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse'){hoverX=hoverY=null;render();} });
-window.addEventListener('keydown',e=>{ if(e.key==='Escape'){curStroke=null;sel=-1;selHex=null;selDraw=-1;selLabel=-1;selSite=-1;dragging=null;buildTools();render();}
+window.addEventListener('keydown',e=>{ const typing=document.activeElement&&document.activeElement.tagName==='INPUT'; if(typing)return;   // first statement: Ctrl+Z/Y/S in a text field do native editing, not map actions
+  if(e.key==='Escape'){curStroke=null;sel=-1;selHex=null;selDraw=-1;selLabel=-1;selSite=-1;dragging=null;buildTools();render();}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault(); if(e.shiftKey)redo(); else undo(); return;}   // toLowerCase: Shift makes e.key 'Z'
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo();return;}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();document.getElementById('save').onclick();return;}   // Ctrl+S = download .json, not the browser save-page dialog
-  const typing=document.activeElement&&document.activeElement.tagName==='INPUT'; if(typing)return;
   if(e.key===' '||e.code==='Space'){ if(!spaceHeld){spaceHeld=true;setCursor();} e.preventDefault(); return; }   // hold Space = pan (hand)
   const k=e.key.toLowerCase();
   if(k==='r')applyT('rot'); else if(k==='h')applyT('fx'); else if(k==='v')applyT('fy'); else if(k==='i')applyT('inv');
@@ -633,11 +633,11 @@ const MAP_KEYS=['v','mode','title','titleW','titleD','cols','rows','colsW','rows
 function applyMap(o){ const D=JSON.parse(M0); for(const k of MAP_KEYS) M[k]=(o[k]!==undefined)?o[k]:D[k]; }   // whitelist: keys absent in the save reset to defaults (no leftovers from the previous map)
 function loadMapObj(o){ if(o.v>SCHEMA_V) showBanner('This map was saved by a newer version of OSR Map Maker — loading anyway.');
   const dropped=migrateMap(o); applyMap(o);
-  if(dropped) showBanner(dropped+' damaged item'+(dropped>1?'s were':' was')+' removed while loading this map.'); }
+  if(dropped) showBanner(dropped+' damaged item'+(dropped>1?'s were':' was')+' removed while loading this map.'); return dropped; }
 function afterLoad(){ document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows; setMode(M.mode||'wild'); }
 function parseMap(s){ try{ const o=JSON.parse(s); return validateMap(o)?null:o; }catch(e){ return null; } }
 function loadLS(){
-  let raw=null;
+  let raw=null, usedBackup=false;
   try{ raw=localStorage.getItem('osrmap')||localStorage.getItem('tsrmap2'); }
   catch(e){ showBanner('Browser storage is unavailable — your map won’t persist on reload. Use “Save .json” to keep your work.'); return; }
   if(raw==null) return;
@@ -645,13 +645,13 @@ function loadLS(){
   if(!o){ // corrupted autosave: quarantine it, fall back to the last good backup
     try{ localStorage.setItem('osrmap.corrupt',raw); }catch(e){}
     let bak=null; try{ bak=localStorage.getItem('osrmap.bak'); }catch(e){}
-    o=bak?parseMap(bak):null;
+    o=bak?parseMap(bak):null; usedBackup=!!o;
     showBanner(o?'Your autosave was corrupted — restored the last good backup. The damaged copy was kept in browser storage as “osrmap.corrupt”.'
                 :'Your autosave was corrupted and no backup was available — starting with a fresh map. Use “Save .json” regularly to keep copies.');
     if(!o) return;
   }
-  loadMapObj(o);
-  try{ localStorage.setItem('osrmap.bak',JSON.stringify(M)); }catch(e){}   // last-good backup, refreshed once per successful boot
+  const dropped=loadMapObj(o);
+  if(!usedBackup&&!dropped){ try{ localStorage.setItem('osrmap.bak',JSON.stringify(M)); }catch(e){} }   // refresh last-good backup only on a clean boot — a degraded load must not overwrite it
 }
 // ---- saved map slots: explicit snapshots under 'osrmap.slot.<name>'; the working map autosaves to 'osrmap' as before ----
 const SLOT_PRE='osrmap.slot.';
@@ -1014,6 +1014,7 @@ function doGenerate(){ if(!confirm('Generate a random '+(M.mode==='wild'?'wilder
 // ---------- ?test: in-page invariant checks (dev only — add ?test to the URL; result lands in the tab title + console) ----------
 function runTests(){
   let stash=null; try{ stash=localStorage.getItem('osrmap'); }catch(e){}
+  const uStash=undoStack.slice(), rStash=redoStack.slice();   // generators push snapshots — keep the tests from leaving phantom undo history
   let n=0,f=0; const ok=(c,m)=>{ n++; if(!c){ f++; console.error('FAIL',m); } };
   try{
     // pure helpers
@@ -1040,6 +1041,7 @@ function runTests(){
   }catch(e){ f++; console.error('FAIL (exception)',e); }
   try{ if(stash!=null)localStorage.setItem('osrmap',stash); }catch(e){}   // tests autosave as they generate — put the real map back
   const o=stash?parseMap(stash):null; if(o){ loadMapObj(o); afterLoad(); }
+  undoStack.length=0; for(const s of uStash)undoStack.push(s); redoStack.length=0; for(const s of rStash)redoStack.push(s);   // restore undo/redo history the generators churned
   document.title=(f?'FAIL ':'PASS ')+n+' checks'+(f?' ('+f+' failed)':'');
   console.log('OSR Map Maker tests:',f?'FAIL':'PASS',n,'checks,',f,'failed');
 }
@@ -1047,12 +1049,17 @@ function runTests(){
 // ---------- boot ----------
 // (dev demo fixtures removed for production — use ?gw / ?gd to generate sample maps, ?dev to expose window.MM, ?test to run checks)
 function boot(){
+  const params=new URLSearchParams(location.search);   // exact param matching: ?title=greatest no longer trips ?test etc.
   loadLS();
   document.getElementById('title').value=M.title||'THE HUSH'; document.getElementById('cols').value=M.cols; document.getElementById('rows').value=M.rows;
-  setMode(M.mode||'wild'); const vb=document.getElementById('view'); vb.textContent=(M.view==='gm'?'GM view':'Player view'); vb.classList.toggle('on',M.view==='player'); if(location.search.includes('player'))setView('player');
-  if(location.search.includes('gw')){setMode('wild');genWild();} else if(location.search.includes('gd')){setMode('dun');genDun();}
-  if(location.search.includes('dev'))window.MM=M;
-  if(location.search.includes('test'))runTests();
+  setMode(M.mode||'wild'); const vb=document.getElementById('view'); vb.textContent=(M.view==='gm'?'GM view':'Player view'); vb.classList.toggle('on',M.view==='player'); if(params.has('player'))setView('player');
+  if(params.has('gw')||params.has('gd')){   // dev sample-map links must not clobber the user's autosave: stash it, generate, restore
+    let stash=null; try{ stash=localStorage.getItem('osrmap'); }catch(e){}
+    if(params.has('gw')){setMode('wild');genWild();} else {setMode('dun');genDun();}
+    try{ if(stash!=null)localStorage.setItem('osrmap',stash); else localStorage.removeItem('osrmap'); }catch(e){}
+  }
+  if(params.has('dev'))window.MM=M;
+  if(params.has('test'))runTests();
 }
 let pending=0,started=false,failedIcons=0;
 const iconDone=()=>{ pending--; if(pending===0&&started){ render(); if(failedIcons)showBanner(failedIcons+' map icon'+(failedIcons>1?'s':'')+' failed to load — showing placeholders. Your map data is intact.'); } };

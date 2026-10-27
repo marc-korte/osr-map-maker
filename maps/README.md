@@ -60,7 +60,7 @@ top, not the drawing code.
 
 ## Icons & the Map Maker
 
-The interactive editor `../OSR Map Maker.html` stamps icons from two sets:
+The interactive editor `../index.html` stamps icons from two sets:
 
 - **Dungeon symbols** — the 86 classic high-res PNGs, copied into `icons/dungeon/`.
 - **Hex terrain** — 23 icons (Castle, Forest, Mountains, Swamp, Volcano, ...) in the

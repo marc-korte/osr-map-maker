@@ -16,6 +16,33 @@ map autosaves in that browser (localStorage), named snapshots live under
 **Saved maps** in the sidebar, and **Save .json** / **Load** move maps between
 browsers. Nothing is stored server-side. Undo/redo: Ctrl+Z / Ctrl+Y (macOS: Cmd+Z / Cmd+Shift+Z).
 
+## Using it
+
+- **Wilderness:** pick a terrain in the sidebar and **Paint** (drag) or **Fill** a
+  connected patch; **Water** is the first swatch. **Keyed site** adds a numbered
+  location, **Place name** names a hex (town, ruin…), **Label** puts free text
+  anywhere (regions, seas). **Hex numbers** (Map section) prints classic CCRR
+  coordinates.
+- **Rivers, roads, trails:** freehand, smoothed while you draw, drawn over the
+  terrain (roads dashed, trails dotted). A river's end snaps onto another river
+  (gold ring) to join a tributary, starting on a river's end extends it, and a
+  river always widens toward the water/junction end — draw it in either direction. Name a
+  river by double-clicking it with **Select/Move** (or select it and press Enter).
+- **Dungeon:** **Room** drags out a floor rectangle (Shift-drag carves rock),
+  **Floor/Rock** paint single squares, **Stamp** places symbols — with **Snap to
+  grid** on, doors and windows snap into walls and turn to match, and 2×2 / 2×1
+  pieces sit on the grid lines.
+- **Select/Move:** drag things, double-click (or Enter) to edit text, arrows
+  nudge, `G` toggles GM-only, `Del` deletes, `Ctrl+C` / `Ctrl+V` / `Ctrl+D`
+  copy / paste at the cursor / duplicate. Every shortcut also has a button in
+  the sidebar's **Selection** section for touch screens.
+- **GM / Player view:** GM-only items (and GM-only layers) disappear from the
+  Player view, its key, and its PNG export. **Export PNG** is up to 300 dpi and
+  never includes selection highlights.
+- **Generate** builds a random map from the options; it keeps a title you typed,
+  shows the seed it used (**Reuse** puts it in the Seed box to rebuild that exact
+  map), and is undoable.
+
 ## Layout
 
 ```
@@ -31,9 +58,11 @@ maps/             # Python icon/map generators (dev tooling, not part of the sit
 It's a static file — just open `index.html` in a browser. No build step, no
 server needed.
 
-Dev URL hooks: `?gw` / `?gd` generate a sample wilderness/dungeon, `?dev`
-exposes the model as `window.MM`, and `?test` runs the in-page invariant
-checks (result appears in the tab title; your autosave is restored after).
+Dev URL hooks: `?gw` / `?gd` generate a sample wilderness/dungeon (add
+`&seed=abc` to pick one; that session never autosaves, so your own map is left
+alone), `?dev` exposes the model as `window.MM`, and `?test` runs the in-page
+invariant checks (result appears in the tab title; your autosave is restored
+after).
 
 Editing the icon set (optional):
 

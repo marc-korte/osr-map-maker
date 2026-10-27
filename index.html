@@ -150,7 +150,7 @@ const M={ v:SCHEMA_V, mode:'wild', title:'THE HUSH', titleW:'THE HUSH', titleD:'
 const M0=JSON.stringify(M);   // pristine defaults — loads fill/reset missing fields from this
 // generate-option defaults, shared by buildTools (which seeds the <select>s) and the generators
 const WILD_OPTS_DEF={water:'normal',terrain:'normal',settlements:'some',features:'some',rivers:'some'};
-const DUN_OPTS_DEF={density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes'};
+const DUN_OPTS_DEF={density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes',jaquay:'no'};
 let tool='terrain', curIcon='Forest', filter='';
 let stampT={rot:0,fx:false,fy:false,inv:false};   // transform for new/selected stamps
 let sel=-1;                                        // index of selected dungeon symbol
@@ -276,14 +276,19 @@ function boxesOverlap(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && 
 function labelBox(g,text,px,ax,ay){ g.font='italic '+px+'px Georgia,serif'; const w=g.measureText(text).width; return {x:ax-w/2-4, y:ay-px*0.7, w:w+8, h:px*1.4}; }
 // greedy label placement: each name takes the first candidate slot (below/above/offset) that doesn't collide
 // with an already-placed label, staying near its hex; nudged labels get a faint leader line back to the hex.
-function placeLabels(g,reqs,placed){
+// sampled points of the visible lines in a 40px spatial hash → hitLine(box): does a road/river/trail/border run through it?
+function lineHitTester(arr){ const B=40, grid=new Map(), add=(x,y)=>{ const k=Math.floor(x/B)+'_'+Math.floor(y/B); let a=grid.get(k); if(!a)grid.set(k,a=[]); a.push(x,y); };
+  for(const d of arr){ if(!og(d)||!d.pts||d.pts.length<2)continue; const p=d.pts; for(let i=0;i<p.length-1;i++){ const a=p[i],b=p[i+1], n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])/6)); for(let j=0;j<n;j++) add(a[0]+(b[0]-a[0])*j/n,a[1]+(b[1]-a[1])*j/n); } add(p[p.length-1][0],p[p.length-1][1]); }
+  return box=>{ for(let gx=Math.floor((box.x-3)/B);gx<=Math.floor((box.x+box.w+3)/B);gx++)for(let gy=Math.floor((box.y-3)/B);gy<=Math.floor((box.y+box.h+3)/B);gy++){ const a=grid.get(gx+'_'+gy); if(!a)continue;
+      for(let i=0;i<a.length;i+=2) if(a[i]>=box.x-3&&a[i]<=box.x+box.w+3&&a[i+1]>=box.y-3&&a[i+1]<=box.y+box.h+3) return true; } return false; }; }
+function placeLabels(g,reqs,placed,hitLine){
   placed=placed||[];
   reqs.sort((a,b)=> a.prio-b.prio || a.cy-b.cy);
-  for(const q of reqs){ const s=q.s, cands=[
-      [q.cx, q.cy+0.78*s,0], [q.cx, q.cy-0.72*s,0], [q.cx, q.cy+1.05*s,1], [q.cx, q.cy-1.0*s,1],
-      [q.cx+0.55*s, q.cy+0.78*s,1], [q.cx-0.55*s, q.cy+0.78*s,1] ];
+  for(const q of reqs){ const s=q.s; g.font='italic '+q.px+'px Georgia,serif'; const hw=g.measureText(q.text).width/2+4, cands=[
+      [q.cx, q.cy+0.78*s,0], [q.cx, q.cy-0.72*s,0], [q.cx+0.6*s+hw, q.cy,0], [q.cx-0.6*s-hw, q.cy,0],   // below, above, then beside the symbol (roads leaving up AND down)
+      [q.cx, q.cy+1.05*s,1], [q.cx, q.cy-1.0*s,1], [q.cx+0.55*s, q.cy+0.78*s,1], [q.cx-0.55*s, q.cy+0.78*s,1] ];
     let chosen=null, px=q.px;
-    for(const[ax,ay,nudged]of cands){ const box=labelBox(g,q.text,px,ax,ay); if(!placed.some(b=>boxesOverlap(box,b))){ chosen=[ax,ay,box,nudged]; break; } }
+    for(const pass of(hitLine?[1,0]:[0])) for(const[ax,ay,nudged]of cands){ if(chosen)break; const box=labelBox(g,q.text,px,ax,ay); if(!placed.some(b=>boxesOverlap(box,b))&&!(pass&&hitLine(box))){ chosen=[ax,ay,box,nudged]; } }   // first pass also keeps names off roads/rivers
     if(!chosen){ px=11; const ax=q.cx, ay=q.cy+0.74*s, box=labelBox(g,q.text,px,ax,ay); chosen=[ax,ay,box,0]; }   // last resort: shrink, keep below
     const[ax,ay,box,nudged]=chosen; placed.push(box); if(q.site)labelHit.set(q.site,box);   // remember where the name landed → clicking it selects the site
     if(nudged){ g.save(); g.globalAlpha=0.45; g.strokeStyle=INK; g.lineWidth=0.8; g.beginPath(); g.moveTo(q.cx,q.cy+0.5*s); g.lineTo(ax, box.y); g.stroke(); g.restore(); }
@@ -329,10 +334,24 @@ function riverRibbon(g,p,w0,w1){ const N=p.length; if(N<2)return; const Lf=[],Rt
   g.beginPath(); g.moveTo(Lf[0][0],Lf[0][1]); for(let i=1;i<N;i++)g.lineTo(Lf[i][0],Lf[i][1]); for(let i=N-1;i>=0;i--)g.lineTo(Rt[i][0],Rt[i][1]); g.closePath(); g.fill();
   for(const[q,w]of[[p[0],w0],[p[N-1],w1]]){ g.beginPath(); g.arc(q[0],q[1],w/2,0,7); g.fill(); } }   // round ends, filled on their own so opposite winding can't punch a hole
 function riverMouthWater(d){ if(d.mouthWater!==undefined)return d.mouthWater; if(M.mode!=='wild')return false; const a=d.pts[d.pts.length-1], mh=pickHex(a[0],a[1],layout()); return !!(mh&&hexName(M.hex[mh[0]+','+mh[1]])==='Water'); }
-function drawRiver(g,d){ const p=d.pts, N=p.length-1, a=p[N], pre=p[N-1]||a, mw=riverMouthWater(d), len=(M.mode==='wild'?layout().size:DUN_CELL)*0.5, ang=Math.atan2(a[1]-pre[1],a[0]-pre[0]);
-  const delta=w=>{ g.lineWidth=w; for(const da of[-0.5,0,0.5]){ g.beginPath(); g.moveTo(a[0],a[1]); g.lineTo(a[0]+Math.cos(ang+da)*len,a[1]+Math.sin(ang+da)*len); g.stroke(); } };   // small delta where it empties into water
-  g.fillStyle=PAP; g.strokeStyle=PAP; riverRibbon(g,p,RIVER_W0+3,RIVER_W1+3); if(mw)delta(5.2);   // paper casing: the river reads cleanly where it crosses terrain symbols
-  g.fillStyle=INK; g.strokeStyle=INK; riverRibbon(g,p,RIVER_W0,RIVER_W1); if(mw)delta(2.2); }
+function drawRiver(g,d){ const p=d.pts;   // the widening ribbon is the mouth — no separate delta glyph (it read as a stray Y poking into the water)
+  g.fillStyle=PAP; riverRibbon(g,p,RIVER_W0+3,RIVER_W1+3);   // paper casing: the river reads cleanly wherever it meets terrain symbols
+  g.fillStyle=INK; riverRibbon(g,p,RIVER_W0,RIVER_W1); }
+// a bridge wherever a road crosses a river (generated or hand-drawn): paper deck over the water, parapets with flared ends
+function drawBridges(g,arr){ const ok=d=>og(d)&&d.pts&&d.pts.length>1, roads=arr.filter(d=>strokeKind(d)==='road'&&ok(d)), rivers=arr.filter(d=>d.kind==='river'&&ok(d)); if(!roads.length||!rivers.length)return;
+  const B=40, grid=new Map();   // spatial hash of river segments
+  for(const d of rivers){ const p=d.pts; for(let i=0;i<p.length-1;i++){ const a=p[i],b=p[i+1]; for(let gx=Math.floor(Math.min(a[0],b[0])/B);gx<=Math.floor(Math.max(a[0],b[0])/B);gx++)for(let gy=Math.floor(Math.min(a[1],b[1])/B);gy<=Math.floor(Math.max(a[1],b[1])/B);gy++){ const k=gx+'_'+gy; let l=grid.get(k); if(!l)grid.set(k,l=[]); l.push(a,b); } } }
+  const hits=[];
+  for(const d of roads){ const p=d.pts; for(let i=0;i<p.length-1;i++){ const a=p[i],b=p[i+1];
+      for(let gx=Math.floor(Math.min(a[0],b[0])/B);gx<=Math.floor(Math.max(a[0],b[0])/B);gx++)for(let gy=Math.floor(Math.min(a[1],b[1])/B);gy<=Math.floor(Math.max(a[1],b[1])/B);gy++){   // every cell the road segment covers (a long segment can cross a river far from its midpoint)
+        const l=grid.get(gx+'_'+gy); if(!l)continue;
+        for(let j=0;j<l.length;j+=2){ const c=l[j],e=l[j+1], d1=(b[0]-a[0])*(e[1]-c[1])-(b[1]-a[1])*(e[0]-c[0]); if(!d1)continue;
+          const t=((c[0]-a[0])*(e[1]-c[1])-(c[1]-a[1])*(e[0]-c[0]))/d1, u=((c[0]-a[0])*(b[1]-a[1])-(c[1]-a[1])*(b[0]-a[0]))/d1; if(t<0||t>1||u<0||u>1)continue;
+          const x=a[0]+t*(b[0]-a[0]), y=a[1]+t*(b[1]-a[1]); if(hits.some(h=>(h[0]-x)**2+(h[1]-y)**2<400))continue; hits.push([x,y,Math.atan2(b[1]-a[1],b[0]-a[0])]); } } } }
+  for(const[x,y,ang]of hits){ g.save(); g.translate(x,y); g.rotate(ang); g.fillStyle=PAP; g.fillRect(-10,-6,20,12);
+    g.strokeStyle=INK; g.lineCap='round'; g.lineWidth=2.6; g.beginPath(); g.moveTo(-10,0); g.lineTo(10,0); g.stroke();   // the deck carries the road across, unbroken
+    g.lineWidth=1.5; for(const sy of[-1,1]){ g.beginPath(); g.moveTo(-12,sy*8); g.lineTo(-8,sy*5); g.lineTo(8,sy*5); g.lineTo(12,sy*8); g.stroke(); }
+    g.restore(); } }
 function drawRiverName(g,d){ if(!d.name||d.pts.length<2)return; const p=d.pts, mi=riverIdx(d), m=p[mi], m2=p[mi+1]||p[mi-1]||m, ang=Math.atan2(m2[1]-m[1],m2[0]-m[0]);
   g.save(); g.translate(m[0],m[1]); g.rotate(Math.abs(ang)>Math.PI/2?ang+Math.PI:ang); haloTxt(g,0,-9,d.name,false,12); g.restore(); }
 function drawStroke(g,d){ if(!d||!d.pts||d.pts.length<2)return; g.save(); g.lineJoin='round'; g.lineCap='round';
@@ -421,7 +440,7 @@ function drawWild(g,W,H){
   // every line sits ON TOP of the terrain symbols (rivers + roads with a paper casing): drawn underneath, rivers and
   // trails vanished behind trees/hills — even while being drawn. Stacking: borders, trails, rivers, roads (bridges).
   if(lyr('lines')){ for(const[pts,style]of M.roads) drawRoute(g,pts.map(p=>hcenter(p[0],p[1],L)),style);
-    for(const k of['border','trail','river','road']) drawStrokeList(g,M.drawsW,d=>strokeKind(d)===k); }
+    for(const k of['border','trail','river','road']) drawStrokeList(g,M.drawsW,d=>strokeKind(d)===k); drawBridges(g,M.drawsW); }
   if(M.hexNums) hexNumbers(g,L);
   { const reqs=[], SETTLE=['Castle','Capitol','City','Town','Village','Keep','Tower','Port']; let n=0;
     for(const s of M.sites){ const[x,y]=hcenter(s.c,s.r,L), isSel=!exporting&&M.sites[selSite]===s;
@@ -433,7 +452,7 @@ function drawWild(g,W,H){
       if(lyr('text')&&s.label) reqs.push({cx:x,cy:y,s:L.size,text:s.label,px:14,prio:2,sel:isSel,site:s}); }
     const placed=[];                                                                                          // river names are obstacles labels should avoid
     if(lyr('lines')&&lyr('text')) for(const d of M.drawsW){ if(d.kind==='river'&&d.name&&og(d)&&d.pts.length>1){ const m=d.pts[riverIdx(d)]; placed.push(labelBox(g,d.name,12,m[0],m[1]-9)); } }
-    if(lyr('text')) placeLabels(g,reqs,placed); }
+    if(lyr('text')) placeLabels(g,reqs,placed,(lyr('lines')&&M.drawsW.length)?lineHitTester(M.drawsW):null); }
   if(lyr('lines')&&lyr('text')) for(const d of M.drawsW) if(d.kind==='river'&&og(d)) drawRiverName(g,d);
   if(lyr('text')) M.labelsW.forEach((l,i)=>{ if(og(l)) drawFreeLabel(g,l,i===selLabel,16); });
   if(!exporting&&selHex&&M.hex[selHex]){ const p=selHex.split(',').map(Number),[x,y]=hcenter(p[0],p[1],L); g.save(); g.setLineDash([5,4]); poly(g,hcorners(x,y,L.size*0.94),null,SEL,2); g.restore(); }
@@ -483,16 +502,20 @@ function drawDun(g,W,H){
   for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ if(M.cells[c+','+r]==='floor'){ const x=x0+c*L.cell,y=y0+r*L.cell; g.fillStyle=PAP; g.fillRect(x,y,L.cell,L.cell); } }
   if(M.gridBg){ fullGrid(g,x0,y0,x1,y1,L.cell); }
   else { g.strokeStyle=GRID; g.lineWidth=0.5; for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ if(M.cells[c+','+r]==='floor'){ const x=x0+c*L.cell,y=y0+r*L.cell; g.strokeRect(x,y,L.cell,L.cell); } } }
+  const exits=new Set(); for(const s of M.syms) if(s.exit&&s.icon){ const ec=pickCell(s.x,s.y,L); if(ec&&M.cells[ec[0]+','+ec[1]]==='floor'&&(ec[0]===0||ec[1]===0||ec[0]===M.cols-1||ec[1]===M.rows-1)) exits.add(ec[0]+','+ec[1]); }   // passages that run off the map edge
+  const out=(c,r)=>c<0||r<0||c>=M.cols||r>=M.rows;
   g.strokeStyle=INK; g.lineWidth=2.4;
-  for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ if(M.cells[c+','+r]!=='floor')continue; const x=x0+c*L.cell,y=y0+r*L.cell;
-    if(M.cells[c+','+(r-1)]!=='floor')line(g,x,y,x+L.cell,y,2.4); if(M.cells[c+','+(r+1)]!=='floor')line(g,x,y+L.cell,x+L.cell,y+L.cell,2.4);
-    if(M.cells[(c-1)+','+r]!=='floor')line(g,x,y,x,y+L.cell,2.4); if(M.cells[(c+1)+','+r]!=='floor')line(g,x+L.cell,y,x+L.cell,y+L.cell,2.4); }
+  for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ if(M.cells[c+','+r]!=='floor')continue; const x=x0+c*L.cell,y=y0+r*L.cell, ex=exits.has(c+','+r), wallTo=(nc,nr)=>M.cells[nc+','+nr]!=='floor'&&!(ex&&out(nc,nr));
+    if(wallTo(c,r-1))line(g,x,y,x+L.cell,y,2.4); if(wallTo(c,r+1))line(g,x,y+L.cell,x+L.cell,y+L.cell,2.4);
+    if(wallTo(c-1,r))line(g,x,y,x,y+L.cell,2.4); if(wallTo(c+1,r))line(g,x+L.cell,y,x+L.cell,y+L.cell,2.4); }
   g.strokeStyle=INK;g.lineWidth=2.6;g.strokeRect(x0,y0,x1-x0,y1-y0);
+  for(const k of exits){ const[c,r]=k.split(',').map(Number), x=x0+c*L.cell, y=y0+r*L.cell, e=2.2; g.fillStyle=PAP;   // gap in the frame where the passage leaves the map
+    if(r===0)g.fillRect(x+1.3,y0-e,L.cell-2.6,2*e); if(r===M.rows-1)g.fillRect(x+1.3,y1-e,L.cell-2.6,2*e); if(c===0)g.fillRect(x0-e,y+1.3,2*e,L.cell-2.6); if(c===M.cols-1)g.fillRect(x1-e,y+1.3,2*e,L.cell-2.6); }
   }
   let kn=0; M.syms.forEach((s,i)=>{ const isKey=s.type==='key', n=isKey?++kn:0; const on=(isKey?lyr('keys'):lyr('symbols'))&&og(s); if(!on)return; if(isKey){ const t=String(n||'#'), kr=t.length>1?11:10; disc(g,s.x,s.y,kr,INK); txt(g,s.x,s.y,t,kr*1.05,true,PAP); } else { const[tw,th]=tiles(s.icon); drawIconT(g,'dungeon',s.icon,s.x,s.y,L.cell*tw*0.96,L.cell*th*0.96,s); } if(s.gm)gmDot(g,s.x+L.cell*0.5,s.y-L.cell*0.5);
     if(i===sel&&!exporting){ const[tw,th]=s.icon?symDims(s.icon,s.rot):[1,1], hw=L.cell*(tw/2+0.12), hh=L.cell*(th/2+0.12); g.save(); g.setLineDash([5,4]); g.strokeStyle=SEL; g.lineWidth=2; g.strokeRect(s.x-hw,s.y-hh,hw*2,hh*2); g.restore(); } });   // box the whole footprint (2x2 stairs, 3x1 tables)
   if(lyr('text')) M.labels.forEach((l,i)=>{ if(og(l)) drawFreeLabel(g,l,i===selLabel,13); });
-  if(lyr('lines')){ drawStrokeList(g,M.drawsD); if(lyr('text')) for(const d of M.drawsD) if(d.kind==='river'&&og(d)) drawRiverName(g,d); }
+  if(lyr('lines')){ drawStrokeList(g,M.drawsD); drawBridges(g,M.drawsD); if(lyr('text')) for(const d of M.drawsD) if(d.kind==='river'&&og(d)) drawRiverName(g,d); }
   cartouche(g,W/2,52,M.title,W); compass(g,W-78,150);
   // key + scale note sit ON the map (over rock reserved & kept clear at generation), bottoms aligned near the frame floor
   if(M.showLegend){ const a=legendAnchorDun(L); legendDun(g, a.x, a.y); }
@@ -518,7 +541,8 @@ function dunReserve(L){ const a=legendAnchorDun(L), rb=rulerRectDun(L), n=M.cols
 const legendDunNames=()=>lyr('symbols')?[...new Set(M.syms.filter(s=>s.type!=='key'&&s.icon&&og(s)).map(s=>s.icon))]:[];
 const hasKeys=()=>lyr('keys')&&M.syms.some(s=>s.type==='key'&&og(s));
 function legendDun(g,ax,ay){ const keyed=hasKeys(), lines=legendLineRows(g,M.drawsD), list=legendDunNames().slice(0,Math.max(0,LEG_MAX-lines.length-(keyed?1:0))); if(!list.length&&!keyed&&!lines.length)return;
-  const rows=list.map(n=>[(px,py,rh)=>{ const s=Math.min(30,rh*0.95); drawIcon(g,'dungeon',n,px,py,s,s); },(BY.dungeon[n]?BY.dungeon[n].label:n)]);   // dungeon art fills its box → keep it inside the row
+  const exitIcons=new Set(M.syms.filter(s=>s.exit).map(s=>s.icon));
+  const rows=list.map(n=>[(px,py,rh)=>{ const s=Math.min(30,rh*0.95); drawIcon(g,'dungeon',n,px,py,s,s); },exitIcons.has(n)?'Way out':(BY.dungeon[n]?BY.dungeon[n].label:n)]);   // dungeon art fills its box → keep it inside the row
   rows.push(...lines); if(keyed) rows.push([(px,py,rh)=>{disc(g,px,py,Math.min(12,rh*0.4),INK);},'keyed area']);
   legendBox(g,ax,ay,'MAP KEY',rows,LEG_H);
 }
@@ -597,7 +621,7 @@ function buildTools(){
     const OPTS = M.mode==='dun'
       ? (M.dunOpts=Object.assign({},DUN_OPTS_DEF,M.dunOpts||{}))   // donjon-style generate options
       : (M.wildOpts=Object.assign({},WILD_OPTS_DEF,M.wildOpts||{}));
-    const mkSel=(key,label,vals)=>{ const w=document.createElement('label'); w.className='num'; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode(label));   // NB: named mkSel — a local `sel` would shadow the selected-symbol index
+    const mkSel=(key,label,vals,tip)=>{ const w=document.createElement('label'); w.className='num'; if(tip)w.title=tip; w.style.cssText='display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px;'; w.appendChild(document.createTextNode(label));   // NB: named mkSel — a local `sel` would shadow the selected-symbol index
       const s=document.createElement('select'); s.style.cssText='flex:1;background:#111;color:#eee;border:1px solid #555;border-radius:4px;padding:3px;font-size:12px;'; s.dataset.k='opt:'+key;
       for(const[v,tt]of vals){ const o=document.createElement('option'); o.value=v; o.textContent=tt; if(OPTS[key]===v)o.selected=true; s.appendChild(o); }
       s.onchange=()=>{ OPTS[key]=s.value; save(); }; w.appendChild(s); d.appendChild(w); };
@@ -607,6 +631,7 @@ function buildTools(){
       mkSel('corridors','Corridors',[['straight','Straight'],['winding','Winding'],['maze','Maze']]);
       mkSel('deadends','Dead-ends',[['all','Trim all'],['some','Trim some'],['keep','Keep all']]);
       mkSel('stairs','Stairs',[['yes','Yes'],['no','No']]);
+      mkSel('jaquay','Jaquay',[['no','Off'],['yes','On']],'Jaquay the dungeon (after Jennell Jaquays): loops instead of dead-end branches, secret / concealed / one-way doors on the loops, a back way in, a tunnel out through the map edge, more than one way down (incl. a one-way trapdoor) and a stair inside a passage');
     } else {
       mkSel('water','Water',[['dry','Dry'],['normal','Normal'],['wet','Wet'],['coastal','Coastal']]);
       mkSel('terrain','Terrain',[['smooth','Smooth'],['normal','Normal'],['rugged','Rugged']]);
@@ -1138,34 +1163,20 @@ function genFeatureName(type){ const n=genPlaceName();
 function hexNbrs(c,r){ const D=(r&1)?[[1,0],[-1,0],[0,-1],[1,-1],[0,1],[1,1]]:[[1,0],[-1,0],[-1,-1],[0,-1],[-1,1],[0,1]]; const o=[]; for(const[dc,dr]of D){const x=c+dc,y=r+dr; if(x>=0&&x<M.cols&&y>=0&&y<M.rows)o.push([x,y]);} return o; }
 function dnm(name,fb){ return BY.dungeon[name]?name:(BY.dungeon[fb]?fb:(ICONS.dungeon[0]||{}).n); }
 
-// trace a hex sequence ALONG the hex edges (corner to corner on the shared boundaries), like the
-// Border tool — roads/rivers then run between hexes, never across the centre symbols. smoothStroke
-// rounds the corners afterwards so they read as natural flowing lines rather than rigid grid edges.
-function edgeRoute(hexes,L){
-  if(!hexes||hexes.length<2) return (hexes||[]).map(h=>hcenter(h[0],h[1],L));
-  const pts=[];
-  for(let i=0;i<hexes.length-1;i++){
-    const ca=hcenter(hexes[i][0],hexes[i][1],L), cb=hcenter(hexes[i+1][0],hexes[i+1][1],L);
-    const cs=hcorners(ca[0],ca[1],L.size).map(p=>({p,d:(p[0]-cb[0])**2+(p[1]-cb[1])**2})).sort((x,y)=>x.d-y.d);
-    let s0=cs[0].p, s1=cs[1].p;   // the two corners on the edge shared with the next hex
-    if(pts.length){ const last=pts[pts.length-1];
-      if((s1[0]-last[0])**2+(s1[1]-last[1])**2 < (s0[0]-last[0])**2+(s0[1]-last[1])**2){ const t=s0; s0=s1; s1=t; } }   // nearer corner first → continuous walk
-    pts.push(s0,s1);
-  }
-  return pts;
-}
+// hex distance on this odd-r offset grid (via cube coordinates)
+function hexDist(a,b){ const ax=a[0]-(a[1]-(a[1]&1))/2, bx=b[0]-(b[1]-(b[1]&1))/2, dx=ax-bx, dz=a[1]-b[1]; return Math.max(Math.abs(dx),Math.abs(dz),Math.abs(dx+dz)); }
+function makeHeap(less){ const H=[]; return { get size(){ return H.length; },
+  push(e){ H.push(e); let i=H.length-1; while(i>0){ const q=(i-1)>>1; if(!less(H[i],H[q]))break; const t=H[i]; H[i]=H[q]; H[q]=t; i=q; } },
+  pop(){ const top=H[0], last=H.pop(); if(H.length){ H[0]=last; let i=0; for(;;){ const l=2*i+1, r=l+1; let m=i; if(l<H.length&&less(H[l],H[m]))m=l; if(r<H.length&&less(H[r],H[m]))m=r; if(m===i)break; const t=H[i]; H[i]=H[m]; H[m]=t; i=m; } } return top; } }; }
 function intoHex(center,toward,dist){ const dx=toward[0]-center[0], dy=toward[1]-center[1], d=Math.hypot(dx,dy)||1; return [center[0]+dx/d*dist, center[1]+dy/d*dist]; }
-function clampNear(p,ax,ay,max){ const dx=p[0]-ax,dy=p[1]-ay,d=Math.hypot(dx,dy); if(d<=max)return p; const s=max/d; return [ax+dx*s,ay+dy*s]; }   // keep a jittered point within max of its anchor
-// Roads draw UNDER the terrain symbols, so they run straight through hex CENTRES (a direct, purposeful line)
-// rather than weaving corner-to-corner along hex edges like a river. Douglas-Peucker drops the collinear
-// hex-centre zigzag so long runs read as one clean line; each settlement end stops `gap` short of its symbol.
-function roadRoute(path,L){
-  let pts=path.map(h=>hcenter(h[0],h[1],L));
-  const n=pts.length-1, gap=L.size*0.72;
-  pts[0]=intoHex(pts[0],pts[1],gap);                            // start: gap short of the settlement symbol, aimed along the road
-  pts[n]=intoHex(pts[n],pts[n-1],gap);                          // end:   same
-  return simplifyDP(pts, L.size*0.5);                           // collapse straight runs of hexes into single segments
-}
+// hex-corner graph for things that run ALONG hexsides (rivers): nodes = unique hex corners, sides = hex edges, and every
+// side knows the one or two hexes it separates. Corners shared by neighbouring hexes merge on a ¼-px key.
+function hexCornerGraph(L){ const P=[], hexOf=[], adj=[], idOf=new Map(), sides=[], sideOf=new Map();
+  const node=(x,y)=>{ const k=Math.round(x*4)+'_'+Math.round(y*4); let n=idOf.get(k); if(n===undefined){ n=P.length; idOf.set(k,n); P.push([x,y]); hexOf.push([]); adj.push([]); } return n; };
+  for(let r=0;r<M.rows;r++)for(let c=0;c<M.cols;c++){ const k=c+','+r, [x,y]=hcenter(c,r,L), ns=hcorners(x,y,L.size).map(q=>node(q[0],q[1]));
+    for(const n of ns) hexOf[n].push(k);
+    for(let i=0;i<6;i++){ const a=ns[i], b=ns[(i+1)%6], sk=a<b?a*1e6+b:b*1e6+a; let sd=sideOf.get(sk); if(!sd){ sd={a,b,hx:[],w:0}; sideOf.set(sk,sd); sides.push(sd); adj[a].push(sd); adj[b].push(sd); } sd.hx.push(k); } }
+  return {P,hexOf,adj,sides}; }
 function genWild(seedArg){
   const userSeed=(seedArg!=null)?String(seedArg):M.seedW; const seed=resolveSeed(userSeed); seedRng(seed);   // resolution reads M.seedW (user intent), NOT the field
   if(seedArg!=null)M.seedW=userSeed;   // only seedArg / user-entered (field onchange) seeds persist — a minted (blank) seed must NOT stick, or argless Generate would repeat the same map
@@ -1213,55 +1224,90 @@ function genWild(seedArg){
   function placeSettlements(){
     const goodSet=(c,r)=>['Grassland','Hills','Forest','Evergreen','ForestedHills'].includes(g[c+','+r])&&!RES.has(c+','+r);
     const nset=Math.max(1,Math.round(Math.min(5,Math.max(2,Math.round(cols*rows/40)))*cntF[O.settlements])); let t=0;   // settlements scales town count
-    while(settle.length<nset && t++<300){ const c=rnd(cols),r=rnd(rows); if(!goodSet(c,r)||settle.some(s=>Math.abs(s[0]-c)+Math.abs(s[1]-r)<3))continue; settle.push([c,r]); M.hex[c+','+r]= settle.length===1?'Castle':pick(['Town','Village','Village','Tower']); M.sites.push({c,r,label:genPlaceName(),kind:'place'}); } }
+    while(settle.length<nset && t++<300){ const c=rnd(cols),r=rnd(rows); if(!goodSet(c,r)||settle.some(s=>hexDist(s,[c,r])<3))continue; settle.push([c,r]); M.hex[c+','+r]= settle.length===1?'Castle':pick(['Town','Village','Village','Keep']); M.sites.push({c,r,label:genPlaceName(),kind:'place'}); } }   // Keep, not Tower: towers are already a landmark → no tower clusters
 
   function placeFeatures(){   // scatter features BEFORE routing so roads/rivers can curve around them too
     const feats=[['Ruins',['Grassland','Hills','Forest','Badlands','ForestedHills']],['Cave',['Hills','Mountains','EvergreenMountains','ForestedMountains']],['StandingStones',['Grassland','Badlands','Hills']],['Tower',['Hills','Grassland','ForestedHills']],['Tomb',['Hills','Badlands','Grassland']],['Mine',['Hills','Mountains','EvergreenMountains','ForestedMountains','SnowMountains']]];
     // features caps the scatter count {few:2, some:4, many:7}
-    let ft=0,fp=0; while(fp<featCap && ft++<300){ const c=rnd(cols),r=rnd(rows),cur=g[c+','+r],f=pick(feats); if(f[1].includes(cur)&&!settle.some(s=>s[0]===c&&s[1]===r)&&!M.sites.some(s=>s.c===c&&s.r===r)){M.hex[c+','+r]=f[0]; M.sites.push({c,r,label:genFeatureName(f[0]),kind:'place'}); fp++;} } }
+    let ft=0,fp=0; while(fp<featCap && ft++<400){ const c=rnd(cols),r=rnd(rows),cur=g[c+','+r],f=pick(feats);
+      if(!f[1].includes(cur)||M.sites.some(s=>{ const d=hexDist([s.c,s.r],[c,r]); return d<2||(d<4&&hexName(M.hex[s.c+','+s.r])===f[0]); }))continue;   // no landmark touching another site; no two of a kind within 3 hexes
+      M.hex[c+','+r]=f[0]; M.sites.push({c,r,label:genFeatureName(f[0]),kind:'place'}); fp++; } }
 
-  function buildRoads(){   // minimum spanning tree over settlements, each edge routed hex-by-hex around mountains/water
-    const rcost=(c,r)=>{ if(RES.has(c+','+r))return 4000; const tt=g[c+','+r];   // roads route around the reserved key footprint
-      if(tt==='Water')return 4000;          // effectively impassable: roads hug the coast / go around, never cut across water
-      if(tt==='Mountains'||tt==='SnowMountains'||tt==='EvergreenMountains'||tt==='ForestedMountains'||tt==='Volcano')return 16;
-      if(tt==='Swamp'||tt==='Marsh'||tt==='Jungle'||tt==='JungleHills')return 9;
-      if(tt==='Desert'||tt==='RockyDesert'||tt==='SandDunes'||tt==='Badlands'||tt==='Cactus'||tt==='HeavyCactus')return 3;
-      if(tt==='Hills'||tt==='ForestedHills'||tt==='EvergreenHills'||tt==='Forest'||tt==='HeavyForest'||tt==='Evergreen'||tt==='HeavyEvergreen')return 2.4;
-      return 1; };
-    if(settle.length>1){ const N=settle.length, key=h=>h[0]+','+h[1];
-      const pcost=p=>{ let s=0; for(let k=1;k<p.length;k++)s+=rcost(p[k][0],p[k][1]); return s; };
-      const D=Array.from({length:N},()=>new Array(N).fill(1e18));                                // real least-cost distance between every pair of settlements
-      for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){ const p=hexPath(settle[i],settle[j],g,rcost); const cst=p?pcost(p):1e18; D[i][j]=D[j][i]=cst; }
-      const inTree=[0], todo=settle.map((_,i)=>i).filter(i=>i>0), edges=[];                       // Prim MST on real route cost → terrain-aware topology, not straight-line nearest
-      while(todo.length){ let pk=0,from=0,bd=1e18;
-        todo.forEach((ti,ix)=>{ inTree.forEach(ci=>{ if(D[ci][ti]<bd){bd=D[ci][ti];pk=ix;from=ci;} }); });
-        edges.push([from,todo[pk]]); inTree.push(todo[pk]); todo.splice(pk,1); }
-      const roadHexes=new Set(settle.map(key));                                                   // towns + already-built roads are cheap, so new roads merge onto them → trunk roads, junctions, branches
-      const rcost2=(c,r)=> roadHexes.has(c+','+r) ? 0.3 : rcost(c,r);
-      for(const [a,b] of edges){ const path=hexPath(settle[a],settle[b],g,rcost2);
-        if(path&&path.length>1){ for(const h of path) roadHexes.add(key(h)); M.drawsW.push({pts:smoothStroke(roadRoute(path,L)),kind:'road'}); } } } }
-
-  function carveRivers(){   // from a high, inland source carve downhill to the nearest water or map edge (A* favours low ground)
+  const riverPairs=new Set(), pairKey=(a,b)=>a<b?a+'|'+b:b+'|'+a;   // hex pairs a river runs between → a road crossing there needs a bridge
+  // RIVERS run along HEXSIDES — between the terrain symbols, never through them. One multi-source Dijkstra from every
+  // shore / map-edge corner gives each corner its cheapest way down to water (a drainage tree: low ground is cheap,
+  // seeded noise makes meanders). Sources are the high corners farthest from water, traced down that tree, so later
+  // rivers meet earlier ones as tributaries and every river is long enough to read as one.
+  function carveRivers(){
     const elevOf=t=>(t==='Mountains'||t==='SnowMountains'||t==='EvergreenMountains'||t==='ForestedMountains'||t==='Volcano')?5:(t==='Hills'||t==='ForestedHills'||t==='EvergreenHills'||t==='JungleHills')?3:(t==='Forest'||t==='HeavyForest'||t==='Evergreen'||t==='HeavyEvergreen'||t==='Jungle')?2:(t==='Swamp'||t==='Marsh')?0:1;
-    const hi=[]; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ if(RES.has(c+','+r))continue; const e=elevOf(g[c+','+r]); if(e>=3)hi.push([c,r,e+Math.min(c,cols-1-c,r,rows-1-r)*1.6]); }
-    if(!hi.length)for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ if(g[c+','+r]!=='Water'&&!RES.has(c+','+r))hi.push([c,r,Math.min(c,cols-1-c,r,rows-1-r)*1.6]); } // flat map: source from the most inland land
-    const waters=[]; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) if(g[c+','+r]==='Water') waters.push([c,r]);
-    const siteHex=new Set(M.sites.map(s=>s.c+','+s.r));   // rivers draw over the terrain → keep them out of town/landmark icons where there's any way round
-    const rcostR=(c,r)=>{ const k=c+','+r; if(RES.has(k))return 4000; const tt=g[k]; return tt==='Water'?0.15:(1+elevOf(tt)*0.6)+(siteHex.has(k)?40:0); };       // rivers also avoid the reserved key footprint
-    if(hi.length){ hi.sort((a,b)=>b[2]-a[2]);                                                       // more, spaced rivers on bigger maps; each runs source → nearest sea
-      const nriv=Math.max(1,Math.round(Math.min(6,Math.max(1,Math.round(cols*rows/350)))*cntF[O.rivers])), used=[], minSep=Math.max(3,Math.max(cols,rows)*0.18);   // rivers scales count ('none' skips the phase entirely)
-      for(let ri=0; ri<hi.length && used.length<nriv; ri++){ const src=hi[ri];
-        if(used.some(u=>Math.abs(u[0]-src[0])+Math.abs(u[1]-src[1])<minSep)) continue;
-        let tgt=null,bd=1e18;
-        for(const w of waters){ const d=Math.abs(w[0]-src[0])+Math.abs(w[1]-src[1]); if(d>0&&d<bd){bd=d;tgt=w;} }
-        if(!tgt){ bd=1e18; for(const e of [[0,src[1]],[cols-1,src[1]],[src[0],0],[src[0],rows-1]]){ const d=Math.abs(e[0]-src[0])+Math.abs(e[1]-src[1]); if(d<bd){bd=d;tgt=e;} } }
-        const rp=tgt&&hexPath([src[0],src[1]],tgt,g,rcostR);
-        if(rp&&rp.length>2){ const ctr=rp.map(h=>hcenter(h[0],h[1],L)), j=L.size*0.38, cl=L.size*0.42, wig=[ctr[0]];   // meander: jittered midpoints + centres, endpoints anchored — a straight run of hexes must never read as a straight river
-          for(let i=1;i<ctr.length;i++){ const a=ctr[i-1],b=ctr[i], mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;
-            wig.push(clampNear([mx+(rndf()-.5)*j,my+(rndf()-.5)*j],mx,my,cl));   // clamp jitter so vertices never leave their hex
-            wig.push(i<ctr.length-1?clampNear([b[0]+(rndf()-.5)*j,b[1]+(rndf()-.5)*j],b[0],b[1],cl):b); }
-          const pts=smoothStroke(wig), mhx=pickHex(pts[pts.length-1][0],pts[pts.length-1][1],L);   // Chaikin turns the jitter into smooth bends; precompute name anchor + mouth
-          M.drawsW.push({pts,kind:'river',name:genPlaceName()+' River',nameIdx:riverNamePt(pts),mouthWater:!!(mhx&&M.hex[mhx[0]+','+mhx[1]]==='Water')}); used.push(src); } } } }
+    const {P,hexOf,adj,sides}=hexCornerGraph(L), N=P.length, wet=k=>g[k]==='Water';
+    const tgt=new Uint8Array(N);   // 1 = shore corner, 2 = map-edge corner (never one touching the key's reserve)
+    for(let n=0;n<N;n++){ const hs=hexOf[n]; if(hs.some(k=>RES.has(k)))continue; if(hs.some(wet))tgt[n]=1; else if(hs.length<3)tgt[n]=2; }
+    for(const sd of sides){ let e=0,res=false,w=false; for(const k of sd.hx){ e+=elevOf(g[k]); if(RES.has(k))res=true; if(wet(k))w=true; }
+      sd.w=res?4000:w?60:(1+0.55*e/sd.hx.length)*(sd.hx.length<2?5:1)*(0.55+0.9*rndf()); }   // coastline + map border are avoided as river courses
+    const dist=new Float64Array(N).fill(Infinity), down=new Int32Array(N).fill(-1), H=makeHeap((x,y)=>x[0]<y[0]||(x[0]===y[0]&&x[1]<y[1]));
+    for(let n=0;n<N;n++) if(tgt[n]){ dist[n]=0; H.push([0,n]); }
+    while(H.size){ const[d,u]=H.pop(); if(d!==dist[u])continue; for(const sd of adj[u]){ const v=sd.a===u?sd.b:sd.a; if(tgt[v])continue; const nd=d+sd.w; if(nd<dist[v]){ dist[v]=nd; down[v]=u; H.push([nd,v]); } } }
+    const siteK=new Set(M.sites.map(s=>s.c+','+s.r));
+    const cand=[]; for(let n=0;n<N;n++){ if(tgt[n]||!(dist[n]<4000))continue; let hi=0,bad=false; for(const k of hexOf[n]){ hi=Math.max(hi,elevOf(g[k])); if(RES.has(k)||siteK.has(k))bad=true; } if(!bad)cand.push([n,dist[n]*(hi>=3?1.6:1)]); }   // hills/mountains make the best springs; never one touching a town/landmark
+    cand.sort((a,b)=>b[1]-a[1]||a[0]-b[0]);
+    const nriv=Math.max(1,Math.round(Math.min(8,Math.max(1,Math.round(cols*rows/180)))*cntF[O.rivers])), sep=Math.max(3,Math.max(cols,rows)*0.18)*L.hw;   // 'Rivers' option scales the count ('none' skips the phase)
+    const owner=new Int32Array(N).fill(-1), rivers=[];
+    const trace=n0=>{ const path=[n0]; let u=n0, join=-1; while(down[u]>=0){ u=down[u]; path.push(u); if(owner[u]>=0){ join=owner[u]; break; } } return {path,join,end:u}; };
+    for(const[n0]of cand){ if(rivers.length>=nriv)break; if(owner[n0]>=0)continue;
+      if(rivers.some(rv=>Math.hypot(P[rv.path[0]][0]-P[n0][0],P[rv.path[0]][1]-P[n0][1])<sep))continue;
+      const t=trace(n0); if(t.path.length<(t.join>=0?6:8))continue;   // long enough to read as a river (a tributary may be a little shorter)
+      for(let i=0;i<t.path.length-(t.join>=0?1:0);i++) owner[t.path[i]]=rivers.length; rivers.push(t); }
+    if(!rivers.length&&cand.length){ const t=trace(cand[0][0]); if(t.path.length>=4){ for(const n of t.path)owner[n]=0; rivers.push(t); } }   // a cramped map: still give it the longest run there is
+    rivers.forEach(rv=>{ const p=rv.path, j=L.size*0.05, e=P[rv.end];   // hexsides already zigzag: only a hair of wobble, or a bend could graze a symbol
+      const pts=p.map((n,i)=>(i===0||i===p.length-1)?[P[n][0],P[n][1]]:[P[n][0]+(rndf()-.5)*2*j,P[n][1]+(rndf()-.5)*2*j]);   // a slight wobble, still clear of the symbols
+      if(rv.join<0){ let dx,dy;   // carry the mouth into the lake / off the map edge so it visibly arrives
+        if(tgt[rv.end]===1){ const[wc,wr]=hexOf[rv.end].find(wet).split(',').map(Number), w=hcenter(wc,wr,L); dx=w[0]-e[0]; dy=w[1]-e[1]; }
+        else { let ax=0,ay=0; for(const k of hexOf[rv.end]){ const[c,r]=k.split(',').map(Number), h=hcenter(c,r,L); ax+=h[0]; ay+=h[1]; } dx=e[0]-ax/hexOf[rv.end].length; dy=e[1]-ay/hexOf[rv.end].length; }
+        const d=Math.hypot(dx,dy)||1, ext=L.size*(tgt[rv.end]===1?0.35:0.5); pts.push([e[0]+dx/d*ext,e[1]+dy/d*ext]); }
+      rv.pts=smoothStroke(pts);
+      if(rv.join>=0){ const m=rivers[rv.join].pts; let bd=1e18,bp=null;   // land the confluence ON the smoothed main river
+        for(let i=0;i<m.length-1;i++){ const a=m[i],b=m[i+1],ddx=b[0]-a[0],ddy=b[1]-a[1],L2=ddx*ddx+ddy*ddy; let t=L2?((e[0]-a[0])*ddx+(e[1]-a[1])*ddy)/L2:0; t=t<0?0:t>1?1:t; const x=a[0]+t*ddx,y=a[1]+t*ddy,dd=(x-e[0])**2+(y-e[1])**2; if(dd<bd){bd=dd;bp=[x,y];} }
+        if(bp)rv.pts[rv.pts.length-1]=bp; }
+      for(let i=0;i<p.length-1;i++){ const sd=adj[p[i]].find(x=>(x.a===p[i]?x.b:x.a)===p[i+1]); if(sd&&sd.hx.length===2)riverPairs.add(pairKey(sd.hx[0],sd.hx[1])); }
+      M.drawsW.push({pts:rv.pts,kind:'river',...((rv.join<0||p.length>=10)?{name:genPlaceName()+' River'}:{}),mouthWater:rv.join<0&&tgt[rv.end]===1}); });   // short tributaries stay unnamed (less clutter)
+    for(const d of M.drawsW) if(d.kind==='river'&&d.name) d.nameIdx=riverNamePt(d.pts); }
+
+  // ROADS: minimum spanning tree over the settlements on real route cost, each edge routed hex-by-hex around water,
+  // mountains, the key's reserve and every OTHER town/landmark; crossing a river costs extra (it's a bridge). All
+  // routes are merged into one network and drawn chain by chain → shared stretches are drawn once and junctions meet.
+  function buildRoads(){
+    if(settle.length<2)return;
+    const terr=tt=>(tt==='Mountains'||tt==='SnowMountains'||tt==='EvergreenMountains'||tt==='ForestedMountains'||tt==='Volcano')?16:(tt==='Swamp'||tt==='Marsh'||tt==='Jungle'||tt==='JungleHills')?9:(tt==='Desert'||tt==='RockyDesert'||tt==='SandDunes'||tt==='Badlands'||tt==='Cactus'||tt==='HeavyCactus')?3:(tt==='Hills'||tt==='ForestedHills'||tt==='EvergreenHills'||tt==='Forest'||tt==='HeavyForest'||tt==='Evergreen'||tt==='HeavyEvergreen')?2.4:1;
+    const N=settle.length, key=h=>h[0]+','+h[1], siteK=new Set(M.sites.filter(s=>!s.water).map(s=>s.c+','+s.r));
+    const avoid=(goal,cheap)=>(c,r,pc,pr)=>{ const k=c+','+r; if(cheap&&cheap.has(k))return 0.3;   // existing road / town: merge onto it → trunk roads and junctions
+      if(RES.has(k)||g[k]==='Water')return 4000; let v=terr(g[k]); if(siteK.has(k)&&k!==goal)v+=40; if(pc!==undefined&&riverPairs.has(pairKey(pc+','+pr,k)))v+=6; return v; };
+    const pcost=(p,f)=>{ let t=0; for(let k=1;k<p.length;k++)t+=f(p[k][0],p[k][1],p[k-1][0],p[k-1][1]); return t; };
+    const D=Array.from({length:N},()=>new Array(N).fill(1e18));                                  // real least-cost distance between every pair of settlements
+    for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){ const f=avoid(key(settle[j])), p=hexPath(settle[i],settle[j],g,f); D[i][j]=D[j][i]=p?pcost(p,f):1e18; }
+    const inTree=[0], todo=settle.map((_,i)=>i).filter(i=>i>0), edges=[];                         // Prim MST on real route cost → terrain-aware topology, not straight-line nearest
+    while(todo.length){ let pk=0,from=0,bd=1e18;
+      todo.forEach((ti,ix)=>{ inTree.forEach(ci=>{ if(D[ci][ti]<bd){bd=D[ci][ti];pk=ix;from=ci;} }); });
+      edges.push([from,todo[pk]]); inTree.push(todo[pk]); todo.splice(pk,1); }
+    const roadHexes=new Set(settle.map(key)), net=new Map(), link=(a,b)=>{ for(const[x,y]of[[a,b],[b,a]]){ let st=net.get(x); if(!st)net.set(x,st=new Set()); st.add(y); } };
+    for(const[a,b]of edges){ const path=hexPath(settle[a],settle[b],g,avoid(key(settle[b]),roadHexes)); if(!path||path.length<2)continue;
+      for(let i=0;i<path.length;i++){ roadHexes.add(key(path[i])); if(i)link(key(path[i-1]),key(path[i])); } }
+    const town=new Set(settle.map(key)), ek=(a,b)=>a<b?a+'|'+b:b+'|'+a;
+    { // overlapping routes can leave small loops / two roads side by side → keep the cheapest spanning tree, then trim spurs that lead nowhere
+      const w=k=>town.has(k)?0.3:terr(g[k]), E=[]; for(const[k,nb]of net) for(const n of nb) if(k<n) E.push([k,n,w(k)+w(n)]);
+      E.sort((x,y)=>x[2]-y[2]||(x[0]<y[0]?-1:x[0]>y[0]?1:0)||(x[1]<y[1]?-1:x[1]>y[1]?1:0));
+      const par=new Map(), find=x=>{ while(par.get(x)!==x){ par.set(x,par.get(par.get(x))); x=par.get(x); } return x; }; for(const k of net.keys()) par.set(k,k);
+      for(const st of net.values()) st.clear(); for(const[a,b]of E){ const ra=find(a), rb=find(b); if(ra!==rb){ par.set(ra,rb); link(a,b); } }
+      for(let changed=true;changed;){ changed=false; for(const[k,nb]of net){ if(nb.size<=1&&!town.has(k)){ for(const n of nb) net.get(n).delete(k); net.delete(k); changed=true; } } } }
+    const isEnd=k=>net.get(k).size!==2||town.has(k), seen=new Set(), chains=[];
+    const walk=(k,n)=>{ const ch=[k]; let prev=k, cur=n; seen.add(ek(k,n)); for(;;){ ch.push(cur); if(isEnd(cur))break; let nx=null; for(const x of net.get(cur)) if(x!==prev){ nx=x; break; } if(nx===null||seen.has(ek(cur,nx)))break; seen.add(ek(cur,nx)); prev=cur; cur=nx; } return ch; };
+    for(const[k,nb]of net) if(isEnd(k)) for(const n of nb) if(!seen.has(ek(k,n))) chains.push(walk(k,n));   // chain = run between towns / junctions
+    for(const[k,nb]of net) for(const n of nb) if(!seen.has(ek(k,n))) chains.push(walk(k,n));            // a loop with no town on it
+    const gap=L.size*0.72;
+    for(const ch of chains){ const pts=ch.map(k=>{ const[c,r]=k.split(',').map(Number); return hcenter(c,r,L); }), n=pts.length-1;
+      if(town.has(ch[0])) pts[0]=intoHex(pts[0],pts[1],gap);                                    // stop short of the town symbol; junction ends meet exactly
+      if(town.has(ch[n])) pts[n]=intoHex(pts[n],pts[n-1],gap);
+      M.drawsW.push({pts:smoothStroke(simplifyDP(pts,L.size*0.5)),kind:'road'}); } }
 
   function nameWaters(){   // flood-fill connected Water hexes; large bodies get a sea/lake name at their centroid
     const seen=new Set();
@@ -1277,7 +1323,7 @@ function genWild(seedArg){
       M.sites.push({c:best[0],r:best[1],label,kind:'place',water:true}); } }
 
   seedTerrain(); smoothTerrain(); floodOcean(); commitTerrain();
-  placeSettlements(); placeFeatures(); buildRoads(); if(O.rivers!=='none')carveRivers(); nameWaters();
+  placeSettlements(); placeFeatures(); if(O.rivers!=='none')carveRivers(); buildRoads(); nameWaters();   // rivers first: roads route knowing where the bridges are
   M.sites=M.sites.filter(s=>!RES.has(s.c+','+s.r));   // safety: nothing labeled under the key
   render(); maybeFit(); save(); commitChange(); buildTools();
   } finally { _rng=Math.random; _pre=null; }   // seeding must never leak into later non-generation randomness; drop any open transaction so a throw can't leave a phantom pre-state for a later commit
@@ -1295,11 +1341,12 @@ function hexPath(a,b,g,cost){
   while(H.length&&guard<lim){ const e=pop(), cur=e[2]; if(closed[cur]||e[0]!==fs[cur])continue; guard++;   // stale heap entry (its f was improved later) → skip
     if(cur===bi){ const p=[]; for(let k=cur;k>=0;k=came[k]) p.unshift([k%C,(k-k%C)/C]); return p; }
     closed[cur]=1; const cc=cur%C, cr=(cur-cc)/C;
-    for(const[nc,nr]of hexNbrs(cc,cr)){ const nk=nr*C+nc; if(closed[nk])continue; const ng=gs[cur]+cost(nc,nr);
+    for(const[nc,nr]of hexNbrs(cc,cr)){ const nk=nr*C+nc; if(closed[nk])continue; const ng=gs[cur]+cost(nc,nr,cc,cr);
       if(ng<gs[nk]){ came[nk]=cur; gs[nk]=ng; fs[nk]=ng+Math.abs(nc-b[0])+Math.abs(nr-b[1]); if(seqOf[nk]<0)seqOf[nk]=seq++; push([fs[nk],seqOf[nk],nk]); } } }
   return null;
 }
 
+let lastDunRooms=[];
 function genDun(seedArg){
   const userSeed=(seedArg!=null)?String(seedArg):M.seedD; const seed=resolveSeed(userSeed); seedRng(seed);   // resolution reads M.seedD (user intent), NOT the field
   if(seedArg!=null)M.seedD=userSeed;   // only seedArg / user-entered (field onchange) seeds persist — a minted (blank) seed must NOT stick, or argless Generate would repeat the same map
@@ -1321,7 +1368,7 @@ function genDun(seedArg){
   // wall line iff exactly one of the two cells straddling it is floor (mirrors drawDun's floor/rock boundary walls).
   const doorFlanked=(c,r,oc,or)=>{ const pc=(or!==r)?1:0, pr=(oc!==c)?1:0;   // perpendicular to the passage direction
     const wall=s=>isFloor(c+s*pc,r+s*pr)!==isFloor(oc+s*pc,or+s*pr);          // boundary edge s cells along the wall line is a wall?
-    return wall(1)&&wall(-1); };
+    return (wall(1)&&wall(-1)) || (!isFloor(oc+pc,or+pr)&&!isFloor(oc-pc,or-pr)); };   // …or a 1-wide passage meets the room head-on (incl. at a corner of a small room): its own walls frame the door
   const doorMouth=new Set();   // room-edge cells that carry a door → keep symbols off them
   let farI=0;                  // farthest room from the entrance — gets the down-stair, skipped for features
 
@@ -1334,27 +1381,54 @@ function genDun(seedArg){
       rooms.push({x,y,w,h}); for(let r=y;r<y+h;r++)for(let c=x;c<x+w;c++)M.cells[c+','+r]='floor'; }
     return rooms.length>0; }
 
+  // zone grid: which room a cell is in, and which room's 1-cell halo (8-neighbourhood) it sits in → corridors keep rock between themselves and rooms
+  const NC=cols*rows, inRoom=new Int16Array(NC).fill(-1), haloOf=new Int16Array(NC).fill(-1), cornerOut=new Uint8Array(NC), at=(c,r)=>r*cols+c;
+  function zoneRooms(){ rooms.forEach((m,i)=>{ for(let r=m.y;r<m.y+m.h;r++)for(let c=m.x;c<m.x+m.w;c++) inRoom[at(c,r)]=i;
+      for(let r=m.y-1;r<=m.y+m.h;r++)for(let c=m.x-1;c<=m.x+m.w;c++){ if(c<0||r<0||c>=cols||r>=rows)continue; const k=at(c,r); if(inRoom[k]<0)haloOf[k]=i; }
+      for(const[c,r]of[[m.x-1,m.y],[m.x,m.y-1],[m.x+m.w,m.y],[m.x+m.w-1,m.y-1],[m.x-1,m.y+m.h-1],[m.x,m.y+m.h],[m.x+m.w,m.y+m.h-1],[m.x+m.w-1,m.y+m.h]]) if(c>=0&&r>=0&&c<cols&&r<rows)cornerOut[at(c,r)]=1; }); }   // just outside a corner cell: a doorway there can't be flanked by wall
+  const JQ=O.jaquay==='yes', loopCells=new Set(), loopPaths=[];   // JAQUAY: cells first carved by a loop link → secret / one-way doors, a stair inside a passage
+
   function carveCorridors(){
-    // corridor router: A* that routes AROUND every room except the two endpoints, and prefers existing
-    // floor (low cost) so corridors merge into junctions/loops instead of cutting through rooms.
+    zoneRooms();
+    // corridor router: A* (binary heap) that keeps a rock gap from every room it isn't joining, leaves / enters its own
+    // rooms straight through one doorway (not along their walls or at a corner), prefers existing floor so corridors
+    // merge into junctions, and avoids running beside another corridor or thickening into 2-wide blobs.
     const turnPen=O.corridors==='straight'?1.4:0;     // 'straight' penalises bends → direct corridors; 'winding'/'maze' wander & merge
-    const dunPath=(a,b,rai,rbi)=>{ const K=(c,r)=>c+','+r, ak=K(a[0],a[1]), bk=K(b[0],b[1]);
-      const blocked=(c,r)=>{ if(c<0||r<0||c>=cols||r>=rows)return true; if(RES.has(c+','+r))return true; for(let i=0;i<rooms.length;i++){ if(i===rai||i===rbi)continue; const m=rooms[i]; if(c>=m.x&&c<m.x+m.w&&r>=m.y&&r<m.y+m.h)return true; } return false; };
-      const open=[a], g={[ak]:0}, f={[ak]:0}, came={}, dirOf={[ak]:-1}, inOpen=new Set([ak]), closed=new Set(); let guard=0;
-      while(open.length&&guard++<Math.max(40000,cols*rows*4)){ let bi=0; for(let i=1;i<open.length;i++) if(f[K(open[i][0],open[i][1])]<f[K(open[bi][0],open[bi][1])])bi=i;
-        const cur=open.splice(bi,1)[0], ck=K(cur[0],cur[1]); inOpen.delete(ck);
-        if(ck===bk){ const p=[cur]; let k=ck; while(came[k]){ const pk=came[k]; p.unshift(pk.split(',').map(Number)); k=pk; } return p; }
-        closed.add(ck);
-        for(let di=0;di<4;di++){ const nc=cur[0]+DIRS[di][0],nr=cur[1]+DIRS[di][1]; if(blocked(nc,nr))continue; const nk=K(nc,nr); if(closed.has(nk))continue;
-          const ng=g[ck]+(M.cells[nk]==='floor'?0.4:1)+((dirOf[ck]>=0&&dirOf[ck]!==di)?turnPen:0);
-          if(g[nk]===undefined||ng<g[nk]){ came[nk]=ck; dirOf[nk]=di; g[nk]=ng; f[nk]=ng+Math.abs(nc-b[0])+Math.abs(nr-b[1]); if(!inOpen.has(nk)){open.push([nc,nr]);inOpen.add(nk);} } } }
+    const fl=(c,r)=>c>=0&&r>=0&&c<cols&&r<rows&&M.cells[c+','+r]==='floor', corrAt=(c,r)=>fl(c,r)&&inRoom[at(c,r)]<0;
+    const stepCost=(c,r,rai,rbi,freshDoor)=>{ if(c<1||r<1||c>=cols-1||r>=rows-1||RES.has(c+','+r))return Infinity;   // the outer ring stays rock (only a Jaquay exit tunnel breaks it)
+      const k=at(c,r), ir=inRoom[k];
+      if(ir>=0) return (ir===rai||ir===rbi)?0.4:Infinity;   // through a room only if it's one of the two being joined
+      if(fl(c,r)) return (freshDoor&&(haloOf[k]===rai||haloOf[k]===rbi))?8:0.4;   // merge onto an existing corridor — but a loop link leaves its rooms by a NEW doorway
+      let v=1; const h=haloOf[k], beside=corrAt(c+1,r)||corrAt(c-1,r)||corrAt(c,r+1)||corrAt(c,r-1);
+      if(h>=0) v+=(h===rai||h===rbi)?3+(cornerOut[k]?4:0)+(beside?8:0):30;   // skirting a room: only to enter/leave it, never by a corner, never in a doorway beside another one
+      if(beside) v+=1.2;                                                     // beside another corridor (fine once, to merge — not for a run)
+      for(const[dx,dy]of[[1,1],[1,-1],[-1,1],[-1,-1]]) if(corrAt(c+dx,r)&&corrAt(c,r+dy)&&corrAt(c+dx,r+dy)){ v+=8; break; }   // would complete a 2×2 blob
+      return v; };
+    const dunPath=(a,b,rai,rbi,freshDoor)=>{ const ai=at(a[0],a[1]), bi=at(b[0],b[1]), g=new Float64Array(NC).fill(Infinity), came=new Int32Array(NC).fill(-1), dirOf=new Int8Array(NC).fill(-1), closed=new Uint8Array(NC);
+      const H=makeHeap((x,y)=>x[0]<y[0]||(x[0]===y[0]&&x[1]<y[1])); let seq=0; g[ai]=0; H.push([0,seq++,ai]);
+      while(H.size){ const[f,,u]=H.pop(); if(closed[u])continue; closed[u]=1; if(u===bi){ const p=[]; for(let k=u;k>=0;k=came[k]) p.unshift([k%cols,(k-k%cols)/cols]); return p; }
+        const uc=u%cols, ur=(u-uc)/cols;
+        for(let di=0;di<4;di++){ const nc=uc+DIRS[di][0], nr=ur+DIRS[di][1], sc=stepCost(nc,nr,rai,rbi,freshDoor); if(sc===Infinity)continue; const v=at(nc,nr); if(closed[v])continue;
+          const ng=g[u]+sc+((dirOf[u]>=0&&dirOf[u]!==di)?turnPen:0); if(ng<g[v]){ g[v]=ng; came[v]=u; dirOf[v]=di; H.push([ng+Math.abs(nc-b[0])+Math.abs(nr-b[1]),seq++,v]); } } }
       return [a,b]; };
-    // connection graph: nearest-neighbour MST + a few loops
+    // connection graph: nearest-neighbour MST, then loops (a few local ones — or, Jaquayed, loops that matter)
     const edges=[], conn=[0], rest=rooms.map((_,i)=>i).filter(i=>i>0);
     while(rest.length){ let bj=0,bi2=0,bd=1e18; rest.forEach((bIdx,j)=>conn.forEach(aIdx=>{const d=(cx(rooms[aIdx])-cx(rooms[bIdx]))**2+(cy(rooms[aIdx])-cy(rooms[bIdx]))**2; if(d<bd){bd=d;bj=j;bi2=aIdx;}})); edges.push([bi2,rest[bj]]); conn.push(rest[bj]); rest.splice(bj,1); }
-    const hasEdge=(a,b)=>edges.some(e=>(e[0]===a&&e[1]===b)||(e[0]===b&&e[1]===a));
-    { const pairs=[]; for(let i=0;i<rooms.length;i++)for(let j=i+1;j<rooms.length;j++) if(!hasEdge(i,j)) pairs.push([i,j,(cx(rooms[i])-cx(rooms[j]))**2+(cy(rooms[i])-cy(rooms[j]))**2]); pairs.sort((p,q)=>p[2]-q[2]); for(let k=0;k<Math.min(pairs.length,Math.ceil(rooms.length/5));k++) edges.push([pairs[k][0],pairs[k][1]]); }
-    for(const[a,b]of edges){ for(const[c,r]of dunPath(ctr(rooms[a]),ctr(rooms[b]),a,b)) M.cells[c+','+r]='floor'; } }
+    const nTree=edges.length, hasEdge=(a,b)=>edges.some(e=>(e[0]===a&&e[1]===b)||(e[0]===b&&e[1]===a));
+    if(JQ) jaquayLinks(edges);
+    else { const pairs=[]; for(let i=0;i<rooms.length;i++)for(let j=i+1;j<rooms.length;j++) if(!hasEdge(i,j)) pairs.push([i,j,(cx(rooms[i])-cx(rooms[j]))**2+(cy(rooms[i])-cy(rooms[j]))**2]); pairs.sort((p,q)=>p[2]-q[2]); for(let k=0;k<Math.min(pairs.length,Math.ceil(rooms.length/5));k++) edges.push([pairs[k][0],pairs[k][1]]); }
+    edges.forEach(([a,b],ei)=>{ const fresh=[]; for(const[c,r]of dunPath(ctr(rooms[a]),ctr(rooms[b]),a,b,JQ&&ei>=nTree)){ const k=c+','+r; if(M.cells[k]!=='floor'){ M.cells[k]='floor'; fresh.push([c,r]); } }
+      if(JQ&&ei>=nTree&&fresh.length){ for(const[c,r]of fresh) loopCells.add(c+','+r); loopPaths.push(fresh); } }); }
+  // JAQUAY loops: every dead-end room gets a second way out, then rooms that sit close on the map but far apart in the
+  // passage graph are linked — long circuits, alternate routes, the "web" instead of a tree
+  function jaquayLinks(edges){ const n=rooms.length; if(n<3)return; const adjR=rooms.map(()=>new Set()); for(const[a,b]of edges){ adjR[a].add(b); adjR[b].add(a); }
+    const dist=(i,j)=>Math.hypot(cx(rooms[i])-cx(rooms[j]),cy(rooms[i])-cy(rooms[j])), lens=edges.map(([a,b])=>dist(a,b)).sort((x,y)=>x-y), maxLink=Math.max(8,(lens[Math.floor(lens.length/2)]||8)*2.4);
+    const hops=s=>{ const d=new Array(n).fill(1e9); d[s]=0; const q=[s]; for(let qi=0;qi<q.length;qi++){ const u=q[qi]; for(const v of adjR[u]) if(d[v]>d[u]+1){ d[v]=d[u]+1; q.push(v); } } return d; };
+    const link=(i,j)=>{ edges.push([i,j]); adjR[i].add(j); adjR[j].add(i); };
+    const want=Math.max(2,Math.round(n*0.4)); let added=0;
+    for(let i=0;i<n;i++){ if(adjR[i].size!==1)continue; let bj=-1,bd=1e18; for(let j=0;j<n;j++){ if(j===i||adjR[i].has(j))continue; const d=dist(i,j); if(d<bd){bd=d;bj=j;} } if(bj>=0&&bd<=maxLink*1.4){ link(i,bj); added++; } }   // every dead-end room gets a second way out (when one is within reach)
+    while(added<want){ let best=null,bs=0; for(let i=0;i<n;i++){ const h=hops(i); for(let j=i+1;j<n;j++){ if(adjR[i].has(j)||h[j]<3)continue; const d=dist(i,j); if(d>maxLink)continue; const sc=h[j]/(d+2); if(sc>bs){bs=sc;best=[i,j];} } }
+      if(!best)break; link(best[0],best[1]); added++; } }
   function ensureConnected(){   // dunPath's [a,b] fallback can carve nothing → guarantee every room reaches the entrance with an L-tunnel
     const K=(c,r)=>c+','+r;
     const hLeg=(c0,c1,row)=>{ const p=[]; let c=c0; while(c!==c1){ c+=c<c1?1:-1; p.push([c,row]); } return p; };   // cells c0→c1 along a row (start excluded, end included)
@@ -1389,7 +1463,10 @@ function genDun(seedArg){
     // AND whose 1-cell opening is flanked by wall on BOTH perpendicular sides (see doorFlanked) — so the door
     // glyph always lands in a real wall gap, never floating in open floor where a corridor runs flush/parallel.
     // Group consecutive doorway cells per side → one door (corridors are 1-wide so runs are length 1). Variety ~18%.
-    const SPECIAL=['DoorArchway1x1','DoorLocked1x1','DoorPortcullis1x1','DoorSecret1x1','DoorDouble1x1'].filter(n=>BY.dungeon[n]);
+    const SPECIAL=['DoorArchway1x1','DoorLocked1x1','DoorPortcullis1x1',...(JQ?[]:['DoorSecret1x1']),'DoorDouble1x1'].filter(n=>BY.dungeon[n]);   // Jaquayed: secret doors only on the loops, so the main routes stay findable
+    const LOOPDOOR=[['DoorSecret1x1',0.38],['DoorConcealed1x1',0.14],['DoorRevolve1way1x1',0.14]].filter(([n])=>BY.dungeon[n]);
+    const doorIcon=(oc,or)=>{ if(JQ&&loopCells.has(oc+','+or)){ let u=rndf(); for(const[n,p]of LOOPDOOR){ if(u<p)return n; u-=p; } }
+      return rndf()<0.18&&SPECIAL.length?pick(SPECIAL):(BY.dungeon['Door1x1']?'Door1x1':SPECIAL[0]); };
     for(const m of rooms){ const sides=[
         {cells:Array.from({length:m.w},(_,i)=>[m.x+i,m.y]),       out:(c,r)=>[c,r-1], rot:0},
         {cells:Array.from({length:m.w},(_,i)=>[m.x+i,m.y+m.h-1]), out:(c,r)=>[c,r+1], rot:0},
@@ -1397,7 +1474,7 @@ function genDun(seedArg){
         {cells:Array.from({length:m.h},(_,i)=>[m.x+m.w-1,m.y+i]), out:(c,r)=>[c+1,r], rot:90} ];
       for(const side of sides){ let run=[];
         const flush=()=>{ if(run.length){ const e=run[Math.floor(run.length/2)], [oc,or]=side.out(e[0],e[1]), p=cc((e[0]+oc)/2,(e[1]+or)/2);
-            M.syms.push({x:p[0],y:p[1],icon:(rndf()<0.18&&SPECIAL.length?pick(SPECIAL):(BY.dungeon['Door1x1']?'Door1x1':SPECIAL[0])),rot:side.rot}); doorMouth.add(e[0]+','+e[1]); } run=[]; };
+            const ic=doorIcon(oc,or); M.syms.push({x:p[0],y:p[1],icon:ic,rot:side.rot+((ic==='DoorRevolve1way1x1'&&rndf()<0.5)?180:0)}); doorMouth.add(e[0]+','+e[1]); } run=[]; };
         for(const[c,r]of side.cells){ const[oc,or]=side.out(c,r); if(isFloor(c,r)&&isCorr(oc,or)&&doorFlanked(c,r,oc,or)) run.push([c,r]); else flush(); } flush(); } } }   // door only in a genuine 1-cell doorway flanked by wall on both sides — kills doors onto flush/parallel/wide-mouth corridors
 
   function placeStairs(){
@@ -1407,6 +1484,35 @@ function genDun(seedArg){
     // stairs: interior cell of start/far rooms, maximally far from doors
     const placeStair=(m,rot)=>{ let fc=freeCells(m); if(!fc.length)fc=roomCells(m).filter(([c,r])=>!occupied.has(c+','+r)); if(!fc.length)return; let best=fc[0],bs=-1; for(const[c,r]of fc){const s=doorDist(m,c,r); if(s>bs){bs=s;best=[c,r];}} const p=take(best[0],best[1]); M.syms.push({x:p[0],y:p[1],icon:dnm('StairsFlight1x1','StairSpiralSquareDown1x1'),rot}); };
     if(O.stairs!=='no'){ placeStair(rooms[0],stRot(rooms[0])); if(rooms.length>1&&farI!==0)placeStair(rooms[farI],(stRot(rooms[farI])+180)%360); } }   // no down-stair when the far room is the entrance itself
+
+  // JAQUAY: a passage straight out through the map edge from a room's side — a way in that isn't the front stairs
+  function carveExit(){ const opts=[];
+    rooms.forEach((m,i)=>{ if(i===0)return; const mx=m.x+Math.floor(m.w/2), my=m.y+Math.floor(m.h/2);
+      for(const[dx,dy,sx,sy,len]of[[0,-1,mx,m.y,m.w],[0,1,mx,m.y+m.h-1,m.w],[-1,0,m.x,my,m.h],[1,0,m.x+m.w-1,my,m.h]]){ if(len<3)continue;
+        const cells=[]; let c=sx+dx, r=sy+dy, ok=true; while(c>=0&&r>=0&&c<cols&&r<rows){ if(M.cells[c+','+r]==='floor'||RES.has(c+','+r)||inRoom[at(c,r)]>=0){ ok=false; break; }
+          for(const[px,py]of(dx?[[c,r-1],[c,r+1]]:[[c-1,r],[c+1,r]])) if(M.cells[px+','+py]==='floor'||(px>=0&&py>=0&&px<cols&&py<rows&&inRoom[at(px,py)]>=0&&cells.length>0)){ ok=false; break; }
+          if(!ok)break; cells.push([c,r]); c+=dx; r+=dy; }
+        if(ok&&cells.length) opts.push({cells,dx,dy,score:cells.length-0.15*Math.hypot(cx(m)-cx(rooms[0]),cy(m)-cy(rooms[0]))}); } });
+    if(!opts.length)return; opts.sort((a,b)=>a.score-b.score); const o=opts[Math.min(opts.length-1,rnd(Math.min(3,opts.length)))];
+    for(const[c,r]of o.cells) M.cells[c+','+r]='floor';
+    const[ec,er]=o.cells[o.cells.length-1], p=cc(ec,er); occupied.add(ec+','+er);
+    M.syms.push({x:p[0],y:p[1],icon:dnm('Arrow1x1','Arrow1x1'),rot:o.dx<0?0:o.dx>0?180:o.dy<0?90:270,exit:true}); }   // arrow points off the map (the art points left at 0°)
+  // JAQUAY: more than one way in and more than one way down, spread apart; a one-way trapdoor in a passage; a stair
+  // inside a loop passage (the level has two heights)
+  function placeLevelLinks(){ const used=new Set([0]); if(O.stairs!=='no'&&farI!==0)used.add(farI);
+    const d=(i,j)=>Math.hypot(cx(rooms[i])-cx(rooms[j]),cy(rooms[i])-cy(rooms[j]));
+    const room=()=>{ let bi=-1,bs=-1; rooms.forEach((m,i)=>{ if(used.has(i))return; let s=1e9; for(const u of used)s=Math.min(s,d(i,u)); s*=0.85+0.3*rndf(); if(s>bs){bs=s;bi=i;} }); if(bi>=0)used.add(bi); return bi; };
+    const put=(i,icon,alt,gm)=>{ if(i<0)return; const m=rooms[i]; let fc=freeCells(m); if(!fc.length)fc=roomCells(m).filter(([c,r])=>!occupied.has(c+','+r)); if(!fc.length)return;
+      let best=fc[0],bs=-1; for(const[c,r]of fc){ const s=doorDist(m,c,r); if(s>bs){bs=s;best=[c,r];} } const p=take(best[0],best[1]); M.syms.push({x:p[0],y:p[1],icon:dnm(icon,alt),rot:0,...(gm?{gm:true}:{})}); };
+    if(rooms.length>=3) put(room(),'LadderUp1x1','StairsFlight1x1');                  // a back way in from above
+    if(rooms.length>=4) put(room(),'StairSpiralSquareDown1x1','LadderDown1x1');       // a second way down
+    const nearDoor=(c,r)=>DIRS.some(([dx,dy])=>doorMouth.has((c+dx)+','+(r+dy)));
+    const corr=Object.keys(M.cells).filter(k=>{ if(M.cells[k]!=='floor'||occupied.has(k))return false; const[c,r]=k.split(',').map(Number); if(roomAt(c,r)!==-1||nearDoor(c,r)||c===0||r===0||c===cols-1||r===rows-1)return false; return DIRS.filter(([dx,dy])=>isFloor(c+dx,r+dy)).length===2; });
+    if(corr.length){ const[c,r]=corr[rnd(corr.length)].split(',').map(Number), p=take(c,r); M.syms.push({x:p[0],y:p[1],icon:dnm('TrapdoorFloor1x1','PitSquare1x1'),rot:0,gm:true}); }   // a one-way drop to the level below (GM-only: players find it the hard way)
+    const lp=loopPaths.filter(pth=>pth.length>=5).sort((a,b)=>b.length-a.length)[0];
+    if(lp){ for(let off=0;off<lp.length;off++){ const ix=Math.floor(lp.length/2)+((off&1)?-1:1)*Math.ceil(off/2); if(ix<1||ix>=lp.length-1)continue; const[c,r]=lp[ix], k=c+','+r; if(occupied.has(k)||nearDoor(c,r))continue;
+        const horiz=isFloor(c-1,r)&&isFloor(c+1,r)&&!isFloor(c,r-1)&&!isFloor(c,r+1), vert=isFloor(c,r-1)&&isFloor(c,r+1)&&!isFloor(c-1,r)&&!isFloor(c+1,r); if(!horiz&&!vert)continue;
+        const p=take(c,r); M.syms.push({x:p[0],y:p[1],icon:dnm('StairsFlight1x1','StairsFlight1x1'),rot:(horiz?0:90)+(rndf()<0.5?180:0)}); break; } } }   // the passage climbs: two heights on one level
 
   function placeKeysAndFeatures(){   // key (number) per room: a free corner-ish cell, away from doors; a feature symbol in non-stair rooms
     const feats=['Chest1x1','Altar1x1','Fountain1x1','Statue1x1','Cask1x1','Trap1x1','TableRound1x1','Bookcase1x1','CoffinClosed1x1','Loot1x1','Grave1x1'].filter(n=>BY.dungeon[n]);
@@ -1427,11 +1533,15 @@ function genDun(seedArg){
     // placed door, leaving it floating. Protect a 1-cell (incl. diagonal) halo around each door mouth.
     const doorHalo=new Set(); for(const k of doorMouth){ const[c,r]=k.split(',').map(Number); for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++) doorHalo.add((c+dc)+','+(r+dr)); }
     const corr=[]; for(const k in M.cells){ const[c,r]=k.split(',').map(Number); if(M.cells[k]==='floor'&&roomAt(c,r)===-1) corr.push([c,r]); }
+    // a stub cell may touch only the passage it grows from: every floor cell around it (8-neighbourhood) must be the previous
+    // cell or orthogonally next to it — no running beside another corridor, no grazing a room, no 2-wide blobs
+    const clear=(nc,nr,pc,pr)=>{ for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){ if(!dx&&!dy)continue; const x=nc+dx,y=nr+dy; if(M.cells[x+','+y]!=='floor'&&!(x>=0&&y>=0&&x<cols&&y<rows&&inRoom[at(x,y)]>=0))continue; if(x===pc&&y===pr)continue; if(Math.abs(x-pc)+Math.abs(y-pr)===1)continue; return false; } return true; };
     for(let i=0;i<cnt&&corr.length;i++){ let[c,r]=pick(corr), d=pick(DIRS), len=2+rnd(4);
-      for(let s=0;s<len;s++){ const nc=c+d[0],nr=r+d[1]; if(nc<1||nr<1||nc>=cols-1||nr>=rows-1||roomAt(nc,nr)!==-1||M.cells[nc+','+nr]==='floor'||RES.has(nc+','+nr)||doorHalo.has(nc+','+nr))break; M.cells[nc+','+nr]='floor'; c=nc;r=nr; if(rndf()<0.35)d=pick(DIRS); } } }
+      for(let s=0;s<len;s++){ const nc=c+d[0],nr=r+d[1]; if(nc<1||nr<1||nc>=cols-1||nr>=rows-1||roomAt(nc,nr)!==-1||M.cells[nc+','+nr]==='floor'||RES.has(nc+','+nr)||doorHalo.has(nc+','+nr)||haloOf[at(nc,nr)]>=0||!clear(nc,nr,c,r))break; M.cells[nc+','+nr]='floor'; c=nc;r=nr; if(rndf()<0.35)d=pick(DIRS); } } }
 
   if(!placeRooms()){ render(); save(); commitChange(); buildTools(); return; }
-  carveCorridors(); ensureConnected(); placeDoors(); placeStairs(); placeKeysAndFeatures(); addDeadEnds();
+  carveCorridors(); ensureConnected(); if(JQ)carveExit(); placeDoors(); placeStairs(); if(JQ)placeLevelLinks(); placeKeysAndFeatures(); addDeadEnds();
+  lastDunRooms=rooms.map(m=>({...m}));   // for the ?test checks
   { const nm=genDungeonName(); if(titleIsAuto('dun')){ M.title=M.titleD=M.autoTitleD=nm; const ti=document.getElementById('title'); if(ti)ti.value=M.title; } }   // named LAST so the layout's RNG stream (and old seeds) is unchanged
   render(); maybeFit(); save(); commitChange(); buildTools();
   } finally { _rng=Math.random; _pre=null; }   // covers the early return above too — seeding never leaks past a generate; also drops any open transaction so a throw can't leave a phantom pre-state for a later commit
@@ -1478,7 +1588,8 @@ function runTests(){
       if(horiz){ const B=Math.round(gx), rr=Math.floor(gy); a=[B-1,rr]; b=[B,rr]; pc=0; pr=1; }
       else { const B=Math.round(gy), cc2=Math.floor(gx); a=[cc2,B-1]; b=[cc2,B]; pc=1; pr=0; }
       const wall=k=>isFl(a[0]+k*pc,a[1]+k*pr)!==isFl(b[0]+k*pc,b[1]+k*pr);
-      return isFl(a[0],a[1])&&isFl(b[0],b[1])&&wall(1)&&wall(-1); };
+      const narrow=q=>!isFl(q[0]+pc,q[1]+pr)&&!isFl(q[0]-pc,q[1]-pr);   // a 1-wide passage cell: its own walls frame the door
+      return isFl(a[0],a[1])&&isFl(b[0],b[1])&&((wall(1)&&wall(-1))||narrow(a)||narrow(b)); };
     let doorTotal=0;
     for(let i=0;i<10;i++){ setMode('dun'); genDun(); const RESV=dunReserve(layout());
       for(const k of RESV) ok(M.cells[k]!=='floor','dun reserve is rock '+k);
@@ -1558,6 +1669,47 @@ function runTests(){
       ok(M.drawsD.length===2&&M.drawsD[0].pts[2][0]===300,'a river ending at another river\'s mouth stays a separate river'); zoom=z; M.drawsD=sv; }
     { setMode('dun'); const L=layout(), sv=M.syms, sn=M.snap; M.snap=true; M.syms=[{x:L.ox+5.5*L.cell,y:L.oy+6*L.cell,icon:'DoorRevolve1way1x1',rot:0}]; clearSel(); sel=0; applyT('rot'); const r1=M.syms[0].rot; applyT('rot');
       ok(r1===180&&M.syms[0].rot===0,'R turns a wall-snapped door end-for-end'); M.syms=sv; M.snap=sn; sel=-1; }
+    { // generator: rivers run between the symbols, reach water / the map edge / another river; landmarks never touch
+      let iconHits=0, midLake=0, dangling=0, rivers=0, adj=0, short=0;
+      for(const sd of['rv-a','rv-b','rv-c','rv-d','rv-e','rv-f']){ setMode('wild'); M.wildOpts={...WILD_OPTS_DEF,rivers:'many',settlements:'many',features:'many'}; genWild(sd); const L=layout();
+        const icon=k=>{ const n=hexName(M.hex[k]); return n&&n!=='Blank'&&n!=='Water'; }, rv=M.drawsW.filter(d=>d.kind==='river');
+        for(const d of rv){ rivers++; const hx=new Set(); for(const q of d.pts){ const h=pickHex(q[0],q[1],L); if(!h)continue; const k=h.join(','); hx.add(k); const[x,y]=hcenter(h[0],h[1],L); if(icon(k)&&Math.hypot(q[0]-x,q[1]-y)<L.size*0.42)iconHits++; }
+          if(hx.size<4)short++; const e=d.pts[d.pts.length-1], h=pickHex(e[0],e[1],L), inWater=h&&hexName(M.hex[h.join(',')])==='Water';
+          if(inWater){ const[x,y]=hcenter(h[0],h[1],L); if(Math.hypot(e[0]-x,e[1]-y)<L.size*0.3)midLake++; }
+          const onEdge=!h||h[0]===0||h[1]===0||h[0]===M.cols-1||h[1]===M.rows-1, onRiver=rv.some(o=>o!==d&&strokeD2(o,e[0],e[1])<1);
+          if(!inWater&&!onEdge&&!onRiver)dangling++; }
+        const st=M.sites.filter(x=>!x.water); for(let i=0;i<st.length;i++)for(let j=i+1;j<st.length;j++) if(hexDist([st[i].c,st[i].r],[st[j].c,st[j].r])<2)adj++; }
+      M.wildOpts={...WILD_OPTS_DEF};
+      ok(rivers>0&&iconHits===0,'generated rivers never run through a terrain/site symbol ('+iconHits+' hits in '+rivers+' rivers)');
+      ok(midLake===0&&dangling===0,'every generated river ends at a shore, the map edge or another river ('+midLake+' mid-lake, '+dangling+' dangling)');
+      ok(short===0,'generated rivers are at least 4 hexes long ('+short+' short)'); ok(adj===0,'generated landmarks / towns never sit side by side ('+adj+' pairs)'); }
+    { // bridges: a road crossing a river gets one bridge glyph per crossing
+      setMode('wild'); const sv=M.drawsW; M.drawsW=[{kind:'river',pts:[[100,300],[300,300]]},{kind:'road',pts:[[200,200],[200,400]]}]; const c=document.createElement('canvas'), gg=c.getContext('2d'); let n=0; const fr=gg.fillRect.bind(gg); gg.fillRect=(...a)=>{ n++; return fr(...a); };
+      drawBridges(gg,M.drawsW); ok(n===1,'one bridge where a road crosses a river (drew '+n+')');
+      M.drawsW=[{kind:'road',pts:[[10,50],[210,50]]},{kind:'river',pts:[[30,45],[30,55]]},{kind:'river',pts:[[190,45],[190,55]]}]; n=0; drawBridges(gg,M.drawsW);
+      ok(n===2,'a long road segment gets a bridge at every crossing, not just near its midpoint (drew '+n+')'); M.drawsW=sv; }
+    { // dungeon corridors: no 2-wide blobs, every room opening carries a door; Jaquay: loops, several ways in/down, secrets, an exit off the edge
+      const probe=jq=>{ const r={blobs:0,doorless:0,openings:0,leaves:0,rooms:0,waysIn:0,waysDown:0,secret:0,exits:0,exitOnEdge:0,conn:true,flanked:true};
+        for(const sd of['dq-a','dq-b','dq-c','dq-d']){ setMode('dun'); M.dunOpts={...DUN_OPTS_DEF,density:'dense',jaquay:jq?'yes':'no'}; genDun(sd); const L=layout(), rooms=lastDunRooms, F=(x,y)=>M.cells[x+','+y]==='floor';
+          const inR=(x,y)=>rooms.findIndex(m=>x>=m.x&&x<m.x+m.w&&y>=m.y&&y<m.y+m.h), doorCells=new Set();
+          for(const s of M.syms) if(/^Door/.test(s.icon||'')){ const gx=(s.x-L.ox)/L.cell, gy=(s.y-L.oy)/L.cell; if(Math.abs(gx-Math.round(gx))<0.01){ doorCells.add((Math.round(gx)-1)+','+Math.floor(gy)); doorCells.add(Math.round(gx)+','+Math.floor(gy)); } else { doorCells.add(Math.floor(gx)+','+(Math.round(gy)-1)); doorCells.add(Math.floor(gx)+','+Math.round(gy)); } if(!checkDoor(s))r.flanked=false; }
+          const deg=rooms.map(()=>0); r.rooms+=rooms.length;
+          for(const k in M.cells){ if(M.cells[k]!=='floor')continue; const[x,y]=k.split(',').map(Number); if(inR(x,y)>=0)continue;
+            for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ const ri=inR(x+dx,y+dy); if(ri<0)continue; r.openings++; deg[ri]++; if(!doorCells.has(k))r.doorless++; }
+            for(const[dx,dy]of[[1,1],[1,-1],[-1,1],[-1,-1]]) if(F(x+dx,y)&&F(x,y+dy)&&F(x+dx,y+dy)&&inR(x+dx,y)<0&&inR(x,y+dy)<0&&inR(x+dx,y+dy)<0){ r.blobs++; break; } }
+          r.leaves+=deg.filter(d=>d===1).length; if(!dunConnected())r.conn=false;
+          r.waysIn+=M.syms.filter(s=>/LadderUp/.test(s.icon||'')||s.exit).length; r.waysDown+=M.syms.filter(s=>/LadderDown|StairSpiral.*Down|TrapdoorFloor|PitSquare/.test(s.icon||'')).length;
+          r.secret+=M.syms.filter(s=>/DoorSecret|DoorConcealed|DoorRevolve1way/.test(s.icon||'')).length;
+          for(const s of M.syms) if(s.exit){ r.exits++; const ec=pickCell(s.x,s.y,L); if(ec&&F(ec[0],ec[1])&&(ec[0]===0||ec[1]===0||ec[0]===M.cols-1||ec[1]===M.rows-1))r.exitOnEdge++; } }
+        return r; };
+      const n=probe(false), j=probe(true); M.dunOpts={...DUN_OPTS_DEF};
+      ok(n.blobs===0&&j.blobs===0,'generated corridors never thicken into 2-wide blobs ('+n.blobs+'/'+j.blobs+')');
+      ok(n.doorless===0&&j.doorless===0,'every generated room opening carries a door ('+n.doorless+'/'+j.doorless+' doorless of '+(n.openings+j.openings)+')');
+      ok(n.conn&&j.conn&&n.flanked&&j.flanked,'normal + Jaquayed dungeons stay connected and every door sits in a real doorway');
+      ok(j.exits===4&&j.exitOnEdge===4,'Jaquay: one passage out through the map edge per dungeon');
+      ok(j.waysIn>=8&&j.waysDown>=8,'Jaquay: a back way in and extra ways down in every dungeon (in '+j.waysIn+', down '+j.waysDown+')');
+      ok(j.secret>=4,'Jaquay: secret / concealed / one-way doors on the loops ('+j.secret+')');
+      ok(j.leaves/j.rooms<0.25&&j.leaves<n.leaves,'Jaquay: few dead-end rooms ('+j.leaves+'/'+j.rooms+' vs '+n.leaves+' plain)'); }
     ok(!renderFailed,'no render failures during the run');
   }catch(e){ f++; console.error('FAIL (exception)',e); }
   try{ if(stash!=null)localStorage.setItem('osrmap',stash); }catch(e){}   // tests autosave as they generate — put the real map back

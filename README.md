@@ -41,7 +41,15 @@ browsers. Nothing is stored server-side. Undo/redo: Ctrl+Z / Ctrl+Y (macOS: Cmd+
   never includes selection highlights.
 - **Generate** builds a random map from the options; it keeps a title you typed,
   shows the seed it used (**Reuse** puts it in the Seed box to rebuild that exact
-  map), and is undoable.
+  map), and is undoable. Generated rivers run along hexsides (between the
+  symbols) from high ground down to a lake, the sea or the map edge, joining as
+  tributaries; roads link the settlements as one network that steers around
+  other sites, and every road/river crossing gets a bridge. Generated dungeons
+  keep corridors off room walls (a door at every doorway, no 2-wide blobs);
+  the **Jaquay** option ([after Jennell Jaquays](https://thealexandrian.net/wordpress/13085/roleplaying-games/jaquaying-the-dungeon))
+  adds loops instead of dead-end branches, secret / concealed / one-way doors on
+  those loops, a back way in, a passage out through the map edge, more than one
+  way down (including a GM-only trapdoor) and a stair partway along a passage.
 
 ## Layout
 

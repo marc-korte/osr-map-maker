@@ -988,10 +988,10 @@ function legendDun(g,ax,ay){ const keyed=hasKeys(), lines=legendLineRows(g,M.dra
 
 // ---------- room keys: private adventure notes travel with their numbered markers ----------
 const DUN_THEMES={
-  keep:{label:'Ruined keep',rooms:['Guardroom','Collapsed barracks','Old kitchen','Audience hall','Armory','Prison cells'],faction:'A band of scavengers claims the keep and fears something beneath it.',goal:'Discover what drove the keep’s household from their stronghold.',detail:['Rain drips through cracked stone.','A cold hearth smells of old smoke.','Fresh bootprints cross the dust.']},
-  crypt:{label:'Ancient crypt',rooms:['Burial vault','Mourning chamber','Ossuary','Embalming room','Ancestor shrine','Sealed sepulcher'],faction:'Tomb robbers and the restless dead compete for the same relic.',goal:'Learn whose remains were disturbed and settle the ensuing unrest.',detail:['Scraped dust reveals recent visitors.','Faded names cover the walls.','An unseen draft moves funeral ribbons.']},
-  temple:{label:'Lost temple',rooms:['Offering hall','Pilgrim quarters','Ritual chamber','Reliquary','Sacred well','Oracle chamber'],faction:'Exiled acolytes want their sanctuary back without waking its guardian.',goal:'Uncover the abandoned sanctuary’s purpose and who still serves it.',detail:['Broken mosaics depict a forgotten rite.','The air carries a faint scent of incense.','Water echoes somewhere beyond the walls.']},
-  cavern:{label:'Cavern hideout',rooms:['Lookout den','Mushroom garden','Smuggler cache','Flooded hollow','Bone cavern','Hidden refuge'],faction:'Smugglers share these excavated caverns with an unwelcome predator.',goal:'Trace the missing courier’s route through the caves.',detail:['Pale fungus lights old tool marks.','A damp breeze carries distant voices.','Dragged crates leave tracks in the grit.']}
+  keep:{label:'Ruined keep',rooms:['Guardroom','Collapsed barracks','Old kitchen','Audience hall','Armory','Prison cells'],goal:'Discover what drove the keep’s household from their stronghold.',detail:['Rain drips through cracked stone.','A cold hearth smells of old smoke.','Fresh bootprints cross the dust.']},
+  crypt:{label:'Ancient crypt',rooms:['Burial vault','Mourning chamber','Ossuary','Embalming room','Ancestor shrine','Sealed sepulcher'],goal:'Learn whose remains were disturbed and settle the ensuing unrest.',detail:['Scraped dust reveals recent visitors.','Faded names cover the walls.','An unseen draft moves funeral ribbons.']},
+  temple:{label:'Lost temple',rooms:['Offering hall','Pilgrim quarters','Ritual chamber','Reliquary','Sacred well','Oracle chamber'],goal:'Uncover the abandoned sanctuary’s purpose and who still serves it.',detail:['Broken mosaics depict a forgotten rite.','The air carries a faint scent of incense.','Water echoes somewhere beyond the walls.']},
+  cavern:{label:'Cavern hideout',rooms:['Lookout den','Mushroom garden','Smuggler cache','Flooded hollow','Bone cavern','Hidden refuge'],goal:'Trace the missing courier’s route through the caves.',detail:['Pale fungus lights old tool marks.','A damp breeze carries distant voices.','Dragged crates leave tracks in the grit.']}
 };
 // B/X stocking and unguarded treasure; every die uses the caller's seeded stream.
 function bxDungeonLevel(options){
@@ -1091,23 +1091,98 @@ function bxMonsterGroup(level,theme,rng){
   const near=BX_ROOM_MONSTERS.filter(monster=>Math.abs(monster.tier-level)<=2),themed=near.filter(monster=>monster.themes.includes(theme)),pool=themed.length?themed:near;
   const weights=pool.map(monster=>1/(1+Math.abs(monster.tier-level))**2);let roll=rng()*weights.reduce((a,b)=>a+b,0),monster=pool[pool.length-1];
   for(let i=0;i<pool.length;i++){roll-=weights[i];if(roll<0){monster=pool[i];break;}}
+  return bxMonsterCount(monster,level,rng);
+}
+function bxMonsterCount(monster,level,rng){
   let base=0;for(let i=0;i<monster.na[0];i++)base+=bxRoll(rng,monster.na[1]);
   // B/X advises more creatures below their HD level and fewer above it. This
   // original encounter list applies that guideline to the normal dungeon count.
   const delta=level-monster.tier,count=delta>=0?base*(delta+1):Math.max(1,Math.ceil(base/(1-delta)));
   return {...monster,count};
 }
-function makeDungeonStock(seed,rooms){
+const DUN_UNDEAD=new Set(['Skeleton','Ghoul','Wight','Wraith','Mummy','Vampire']);
+const DUN_ROOM_ROLES={hall:'Assembly hall',gallery:'Passage gallery',guard:'Watch post',storage:'Supply room',shrine:'Ritual chamber',rest:'Resting place',archive:'Record room'};
+function makeDungeonPopulation(seed,rooms,stocking,cells=M.cells){
+  // This graph is generation-only. It follows the floor that was actually
+  // carved, including repaired corridors and loops, rather than intended edges.
+  const theme=bxDungeonTheme(),level=bxDungeonLevel(M.dunOpts),rng=mulberry32(hashSeed(seed+'|population|'+theme+'|'+level));
+  const roles=rooms.map((room,i)=>Object.hasOwn(DUN_ROOM_ROLES,room.role)?room.role:['guard','storage','rest','shrine','archive','gallery','hall'][Math.floor(rng()*7)]);
+  const graph=new Map(),roomAt=new Map(),floor=Object.keys(cells||{}).filter(key=>cells[key]==='floor');
+  const add=node=>{if(!graph.has(node))graph.set(node,new Set());return node;};
+  rooms.forEach((room,i)=>{add('r'+i);for(let y=room.y;y<room.y+room.h;y++)for(let x=room.x;x<room.x+room.w;x++){const key=x+','+y;if(cells&&cells[key]==='floor')roomAt.set(key,'r'+i);}});
+  const node=key=>add(roomAt.get(key)||'c'+key);
+  for(const key of floor){const here=node(key),[x,y]=key.split(',').map(Number);for(const[dx,dy]of[[1,0],[0,1]]){const next=(x+dx)+','+(y+dy);if(cells[next]!=='floor')continue;const there=node(next);if(here!==there){graph.get(here).add(there);graph.get(there).add(here);}}}
+  const distances=start=>{const seen=new Map([[start,0]]),queue=[start];for(let i=0;i<queue.length;i++)for(const next of graph.get(queue[i])||[])if(!seen.has(next)){seen.set(next,seen.get(queue[i])+1);queue.push(next);}return seen;};
+  const occupied=stocking.map((stock,i)=>stock.kind==='monster'?i:-1).filter(i=>i>=0),roomOwners=rooms.map(()=>null),factions=[];
+  if(!occupied.length)return {theme,level,roles,roomOwners,factions,relation:null};
+  const first=occupied[Math.floor(rng()*occupied.length)],homes=[first],far=distances('r'+first);
+  if(rooms.length>=6&&occupied.length>=2){const candidates=occupied.filter(i=>i!==first).sort((a,b)=>{const da=far.get('r'+a)??Infinity,db=far.get('r'+b)??Infinity;return da===db?a-b:db-da;});if(candidates.length)homes.push(candidates[0]);}
+  // A crypt is an undead ecosystem. Other themes use one living population;
+  // temples may instead have a shared undead binding. Rivals can be splinter
+  // bands of the same species, rather than requiring an unrelated new monster.
+  const undead=theme==='crypt'||theme==='temple'&&rng()<.55;
+  const names=undead?[['Sepulchral Watch','Keepers of the Last Name','Ashen Vigil'],['Hollow Choir','Unbound Procession','Broken Seal']]:
+    theme==='cavern'?[['Blackpool Kin','Cinder Hollow','Deep Lanterns'],['Split Fang','Red Chalk Clan','Lower Warrens']]:
+    theme==='temple'?[['Veiled Petitioners','Keepers of the Bell','Ashen Votaries'],['Uncrowned Faithful','Open Hand','Exiles of the Gate']]:
+    [['Broken Spear','Riven Banner','Copper Shield'],['Grey Knives','Cinder Company','Red Thread']];
+  const eligible=BX_ROOM_MONSTERS.filter(monster=>monster.themes.includes(theme)&&DUN_UNDEAD.has(monster.name)===undead);
+  const near=eligible.filter(monster=>Math.abs(monster.tier-level)<=2),pool=near.length?near:eligible;
+  for(let f=0;f<homes.length;f++){
+    const weights=pool.map(monster=>1/(1+Math.abs(monster.tier-level))**2);let roll=rng()*weights.reduce((a,b)=>a+b,0),monster=pool.at(-1);
+    for(let i=0;i<pool.length;i++){roll-=weights[i];if(roll<0){monster=pool[i];break;}}
+    const name=names[f][Math.floor(rng()*names[f].length)],id='faction-'+(f+1);
+    const motive=undead?(f?'Obey a fractured burial charge: restore its marked circuit through the disputed chambers.':'Fulfill the old charge to preserve the named dead and stop the removal of funerary property.'):
+      f?'Gain control of the through routes without paying tribute to the other band.':'Hold a defensible refuge and keep its supply route open.';
+    const sustenance=undead?(monster.name==='Ghoul'?'Stored carrion sustains their hunger.':monster.name==='Vampire'?'Sealed blood jars sustain this brood between hunts.':'Inscribed name seals bind this group to its watch; it needs no food or drinking water.'):'Water jars and dry rations support the band; surface foragers replenish them when routes are quiet.';
+    const leverage=undead?(monster.name==='Skeleton'?'Present the matching funerary seal and recite the names to redirect the watch; these skeletons do not converse or accept bribes.':'Offer to restore the group’s name seal or observe its burial taboo. Use the creature’s fixed B/X response where applicable; a rite is not automatic control.'):
+      f?'Offer safe passage for a supply party or information about the rival’s tolls.':homes.length>1?'Offer provisions, repair materials, or a quiet route past the rival; reckless threats make a bargain less likely.':'Offer provisions, repair materials, or news of the surface approaches; reckless threats make a bargain less likely.';
+    factions.push({id,name,kind:undead?'undead':'living',monster:{...monster},roster:[monster.name],home:homes[f],rooms:[],resourceRoom:homes[f],motive,sustenance,leverage,sign:undead?(f?'broken wax circles and reversed funerary marks':'tidy ash lines and intact name seals'):(f?'red chalk bars on the lower door stones':'a split-spear mark beside doorways')});
+  }
+  const owners=new Map(),queue=[];
+  factions.forEach(faction=>{owners.set('r'+faction.home,faction.id);queue.push('r'+faction.home);});
+  for(let i=0;i<queue.length;i++)for(const next of graph.get(queue[i])||[])if(!owners.has(next)){owners.set(next,owners.get(queue[i]));queue.push(next);}
+  rooms.forEach((room,i)=>{roomOwners[i]=owners.get('r'+i)||null;const faction=factions.find(f=>f.id===roomOwners[i]);if(faction)faction.rooms.push(i);});
+  for(const faction of factions){const preferred=undead?['shrine','archive','rest']:['storage','rest'];faction.resourceRoom=faction.rooms.find(i=>preferred.includes(roles[i]))??faction.home;}
+  const relations=undead?[
+    ['conflicting watch orders','Two ritual seals command both watches to bar the same threshold. Each follows the conditions encoded in its own seal; promises and bribes do not change a mindless watch’s orders. The territory marks identify which binding applies.'],
+    ['overlapping burial circuits','Two burial circuits overlap near the territory boundary. Each group repeats its own rite and reacts to interruption. Observing the circuit from a safe chamber can reveal a gap for passage; this gives no control over the dead.'],
+    ['fractured name seals','A former burial rite has split into two incompatible name seals. Each group obeys its own binding rather than a shared command. Restoring a damaged marker can reveal that binding’s conditions; it grants no authority over the other group.']
+  ]:[
+    ['uneasy truce','Both groups mark their boundary and avoid a costly open fight. Each wants outsiders to test the other’s defenses without breaking the truce openly.'],
+    ['contested passage','Both groups claim the connecting passages. Each recognizes the other’s signs and challenges strangers carrying them; neither controls the whole dungeon.'],
+    ['broken compact','The two groups once shared access, but now accuse each other of violating the compact. Returning a disputed marker or negotiating safe passage can reopen talks.']
+  ];
+  const relation=factions.length===2?(()=>{const[status,detail]=far.has('r'+homes[1])?relations[Math.floor(rng()*relations.length)]:['isolated territories','There is no usable mapped passage between the groups. Neither patrols into the other’s rooms; reopening a route would change that isolation.'];return {a:factions[0].id,b:factions[1].id,status,detail};})():null;
+  return {theme,level,roles,roomOwners,factions,relation};
+}
+function dungeonPopulationDuty(role,undead){
+  const duties=undead?{hall:'reenacting the assembly appointed by their binding',gallery:'patrolling between their marked resting places',guard:'keeping the old watch at the approaches',storage:'guarding the bundles and vessels assigned to their care',shrine:'repeating the rite that binds their group',rest:'lying dormant until the boundary is disturbed',archive:'preserving the inscribed names and burial records'}:
+    {hall:'settling the band’s disputes and receiving reports',gallery:'carrying messages and checking territory marks',guard:'watching the approaches and challenging unfamiliar entrants',storage:'counting ordinary rations, water and repair materials',shrine:'maintaining the band’s adopted shrine and oaths',rest:'resting between watches',archive:'comparing route marks and records of debts'};
+  return duties[role]||duties.guard;
+}
+function makeDungeonStock(seed,rooms,populationOut={}){
   const level=bxDungeonLevel(M.dunOpts),theme=bxDungeonTheme();
-  return rooms.map((room,i)=>{const contents=bxRoomContents(mulberry32(hashSeed(seed+'|bx-contents|'+i))),encounter=mulberry32(hashSeed(seed+'|bx-encounter|'+theme+'|'+level+'|'+i)),treasure=mulberry32(hashSeed(seed+'|bx-treasure|'+i)),stock={...contents,level,monster:null,loot:null};
-    if(stock.kind==='monster')stock.monster=bxMonsterGroup(level,theme,encounter);
+  const stocking=rooms.map((room,i)=>({...bxRoomContents(mulberry32(hashSeed(seed+'|bx-contents|'+i))),level,monster:null,loot:null}));
+  const population=makeDungeonPopulation(seed,rooms,stocking);Object.assign(populationOut,population);
+  return stocking.map((stock,i)=>{const encounter=mulberry32(hashSeed(seed+'|bx-encounter|'+theme+'|'+level+'|'+i)),treasure=mulberry32(hashSeed(seed+'|bx-treasure|'+i));
+    stock.factionId=population.roomOwners[i];stock.role=population.roles[i];
+    const faction=population.factions.find(f=>f.id===stock.factionId);
+    // A sealed-off pocket can remain unclaimed without acquiring a random new
+    // species or pretending a faction can reach it through rock.
+    if(stock.kind==='monster')stock.monster=bxMonsterCount((faction||population.factions[0]).monster,level,encounter);
     if(stock.hasTreasure)stock.loot=stock.monster?bxLairTreasure(stock.monster.treasureType,treasure,stock.monster.bonusGP||0):bxUnguardedTreasure(level,treasure);
     return stock;
   });
 }
-function stockDungeonKeys(seed,rooms,order,stocking=makeDungeonStock(seed,rooms)){
+function stockDungeonKeys(seed,rooms,order,stocking=makeDungeonStock(seed,rooms),population=null){
   ensureKeyNumbers(M,'dun');
   const theme=bxDungeonTheme(),rng=mulberry32(hashSeed(seed+'|room-key|'+theme)),choose=a=>a[Math.floor(rng()*a.length)],T=DUN_THEMES[theme],keys=dungeonKeys(),offset=Math.floor(rng()*6);
+  const plan=population||makeDungeonPopulation(seed,rooms,stocking),byRoom=new Map(order.map((i,n)=>[i,keys[n]?keyNumberValue(keys[n],n+1):null]));
+  const areas=indices=>indices.map(i=>byRoom.get(i)).filter(n=>n!==null&&n!==undefined).sort((a,b)=>a-b),area=i=>byRoom.get(i),factionFor=i=>plan.factions.find(f=>f.id===plan.roomOwners[i]);
+  const brief=['Dungeon brief: '+T.label+'. '+(plan.factions.length?'The inhabitants occupy connected territories along the mapped passages; signs and vacant rooms help reveal their boundaries.':'No resident monster group was rolled. This is an abandoned site, not an implied off-map army.')];
+  for(const faction of plan.factions){const territory=areas(faction.rooms),home=area(faction.home),resource=area(faction.resourceRoom);brief.push('Faction: '+faction.name+' — '+faction.roster.join(', ')+'. Territory: areas '+territory.join(', ')+'. Home: area '+home+'. Goal: '+faction.motive+' Supply/binding: '+faction.sustenance+' Kept in area '+resource+'. Leverage: '+faction.leverage);}
+  if(!plan.factions.length)brief.push('Faction: none currently resident. Old signs record abandoned claims; they do not add encounters.');
+  if(plan.relation){const a=plan.factions.find(f=>f.id===plan.relation.a),b=plan.factions.find(f=>f.id===plan.relation.b);brief.push('Relations: '+a.name+' / '+b.name+' — '+plan.relation.status+'. '+plan.relation.detail);}
   const empty=['Dust records earlier visitors, but nothing is living here now.','A cold hearth and abandoned bedding mark an old resting place.','Water stains and scraps of ordinary pottery are all that remain.','The room is quiet; its furniture is worn and has no unusual properties.'];
   const specials=[
     'Special: a stone face whispers the last word spoken here when a hand covers its eyes. Uncovering them stops it. A polished patch on the brow hints at the interaction; it conceals no cache.',
@@ -1131,10 +1206,16 @@ function stockDungeonKeys(seed,rooms,order,stocking=makeDungeonStock(seed,rooms)
   keys.forEach((key,n)=>{const i=order[n],m=rooms[i],stock=stocking[i];if(!m||!stock)return;
     key.name=n===0?'Entrance · '+T.label:T.rooms[(n-1+offset)%T.rooms.length];
     const kind=stock.kind.charAt(0).toUpperCase()+stock.kind.slice(1),parts=['B/X contents: '+kind+'.','Dungeon level: '+stock.level+'.',choose(T.detail)];
-    if(n===0)parts.push('Hook: '+T.goal,'Faction: '+T.faction,'Arrival: tracks lead inward; let the party choose a route and retreat.');
+    const faction=factionFor(i),role=plan.roles[i],purpose=DUN_ROOM_ROLES[role]||'Chamber';
+    if(n===0)parts.push('Hook: '+T.goal,...brief,'Arrival: tracks lead inward; let the party choose a route and retreat.');
+    parts.push('Room purpose: '+(m.role?'Architectural use: '+purpose+'.':'Former '+(n===0?'arrival chamber':key.name.toLowerCase())+'; current use: '+purpose.toLowerCase()+'.'));
+    if(faction){parts.push('Territory: '+faction.name+'. Signs: '+faction.sign+'. '+(stock.kind==='monster'?'This group belongs to that faction.':'No resident group occupies this room; the signs show who uses the surrounding passages.'));
+      if(i===faction.resourceRoom)parts.push('Supply/binding: '+faction.sustenance+' These are ordinary provisions or ritual marks, not an additional treasure hoard.');}
+    else parts.push('Territory: unclaimed; no inhabited territory reaches this room along the mapped floor.');
     if(stock.kind==='monster'){const monster=stock.monster;parts.push('Encounter: '+monster.count+' × '+monster.name+'. B/X HD '+monster.hd+'; ML '+monster.morale+'. Use the B/X '+monster.name+' entry for attacks, saves, movement and special abilities. These are the room occupants, not the total population of the lair.');
-      const undead=['Skeleton','Ghoul','Wight','Wraith','Mummy','Vampire'].includes(monster.name);
-      parts.push(undead?'Behaviour: these undead guard their resting place. Check their B/X entry for senses, immunities and the conditions under which they pursue intruders.':choose(['Behaviour: the occupants are sorting supplies and prefer a warning to a costly fight. A useful offer gives a reason to parley.','Behaviour: the occupants argue over duties. They want a quiet watch and can be distracted or bargained with.','Behaviour: the occupants are repairing equipment. They protect their territory but have a practical use for outsiders.'])+' If their response is uncertain, roll the B/X 2d6 reaction check when the party engages them.');
+      const undead=DUN_UNDEAD.has(monster.name);
+      parts.push(undead?'Behaviour: these undead follow the shared binding and territory signs of their group.':'Behaviour: the occupants maintain a shared refuge and protect their band’s routes.');
+      parts.push('Duty: '+dungeonPopulationDuty(role,undead)+'. '+(faction?'This serves '+faction.name+'’s goal. '+faction.leverage:'The isolated group defends its immediate shelter.')+(undead?' Check the B/X entry for senses, immunities and fixed responses; mindless undead do not negotiate.':' If their response is uncertain, roll the B/X 2d6 reaction check when the party engages them.'));
       if(stock.hasTreasure&&monster.treasureType==='Nil')parts.push('Treasure: none. This creature has no B/X lair treasure. The indicated strongbox is empty; do not invent a hoard for it.');
       else if(stock.hasTreasure)parts.push('Treasure: one communal type '+monster.treasureType+' lair cache'+(monster.bonusGP?' plus '+monster.bonusGP+' gp':'')+', already rolled for this area: '+bxTreasureText(stock.loot)+' Keep this as the group’s hoard, not an amount per creature. The cache is in a concealed strongbox.');
       else parts.push('Treasure: none. The room’s treasure check failed; do not add a fresh lair hoard for every creature.');
@@ -1148,8 +1229,12 @@ function stockDungeonKeys(seed,rooms,order,stocking=makeDungeonStock(seed,rooms)
     const L=layout(),inside=s=>s.icon&&s.x>=L.ox+m.x*L.cell&&s.x<L.ox+(m.x+m.w)*L.cell&&s.y>=L.oy+m.y*L.cell&&s.y<L.oy+(m.y+m.h)*L.cell;
     const features=M.syms.filter(inside).map(s=>s.structure==='column'?'Column':(BY.dungeon[s.icon]||{}).label||s.icon);if(features.length)parts.push('Map features: '+[...new Set(features)].join(', ')+'.');
     if((M.dunOpts||{}).jaquay!=='yes'&&n+1<keys.length)parts.push('Lead: evidence here points toward area '+keyNumberValue(keys[n+1],n+2)+'.');
-    if(n===0){const patrol=mulberry32(hashSeed(seed+'|bx-wandering|'+theme+'|'+stock.level)),table=Array.from({length:6},(_,die)=>{const monster=bxMonsterGroup(stock.level,theme,patrol);return (die+1)+': '+monster.count+' × '+monster.name+' (HD '+monster.hd+', ML '+monster.morale+').';});
-      parts.push('B/X exploration: one turn is 10 minutes. Check for wandering monsters every two turns, 1-in-6; on an encounter roll d6 on the list below. Encounter distance is 2d6 × 10 ft. These are wandering groups, without additional lair hoards.\n'+table.join('\n'),'Reactions: when uncertain, roll 2d6: 2 attacks, 3–5 may attack, 6–8 wary, 9–11 neutral, 12 cooperative; apply the situation and applicable modifiers. Use the creature’s entry when it establishes a fixed response.','Optional morale: roll 2d6 at the first casualty and when half the group is out of the fight; above ML means retreat or surrender. ML 12 does not roll; after two successful checks the group keeps fighting for this encounter.');
+    if(n===0){const patrol=mulberry32(hashSeed(seed+'|bx-wandering|'+theme+'|'+stock.level)),residents=plan.factions.filter(f=>f.rooms.some(i=>stocking[i].kind==='monster'&&area(i)!==null&&area(i)!==undefined));
+      const quiet=['A loose stone falls somewhere ahead.','A cold draft stirs grit across the floor.','Water drips into a hollow vessel.','An old door settles against its frame.','Dust sifts from a cracked lintel.','A distant echo repeats the party’s own noise.'];
+      const table=Array.from({length:6},(_,die)=>{if(!residents.length)return (die+1)+': '+quiet[die]+' No creature appears.';
+        const faction=residents[die<residents.length?die:Math.floor(patrol()*residents.length)],sources=faction.rooms.filter(i=>stocking[i].kind==='monster'&&area(i)!==null&&area(i)!==undefined),source=sources[Math.floor(patrol()*sources.length)],monster=stocking[source].monster,count=Math.min(monster.count,bxRoll(patrol,3));
+        return (die+1)+': '+count+' × '+monster.name+' (HD '+monster.hd+', ML '+monster.morale+') — '+faction.name+'; from area '+area(source)+', within areas '+areas(faction.rooms).join(', ')+'.';});
+      parts.push('B/X exploration: one turn is 10 minutes. Check for wandering monsters every two turns, 1-in-6; on an encounter roll d6 on the list below. Encounter distance is 2d6 × 10 ft. '+(residents.length?'These patrols come from the keyed inhabitants: remove them from their source room while away. Reroll entries whose group has been defeated or whose territory does not include the party’s area. If no eligible entry remains, use a draft, settling stone or distant echo without a creature. They carry no additional lair hoard.':'No resident patrols remain; the table gives atmospheric events without adding unrolled monsters.')+'\n'+table.join('\n'),'Reactions: when uncertain, roll 2d6: 2 attacks, 3–5 may attack, 6–8 wary, 9–11 neutral, 12 cooperative; apply the situation and applicable modifiers. Use the creature’s entry when it establishes a fixed response.','Optional morale: roll 2d6 at the first casualty and when half the group is out of the fight; above ML means retreat or surrender. ML 12 does not roll; after two successful checks the group keeps fighting for this encounter.');
     }
     key.notes=parts.join('\n\n');
   });
@@ -1398,7 +1483,7 @@ function buildTools(){
       mkSel('density','Buildings',[['sparse','Sparse'],['normal','Normal'],['dense','Dense']]);
       if(M.town)note(d,'Current layout: '+(layouts.find(([value])=>value===M.town.layout)?.[1]||'Market spokes (older map)')+'.');
     } else if(M.mode==='dun'){
-      mkSel('theme','Room theme',[['keep','Ruined keep'],['crypt','Ancient crypt'],['temple','Lost temple'],['cavern','Cavern hideout']],'Original themed B/X encounter lists and private room descriptions. Geometry uses the settings below.');
+      mkSel('theme','Dungeon theme',[['keep','Ruined keep'],['crypt','Undead crypt'],['temple','Lost temple'],['cavern','Cavern hideout']],'Sets the inhabitants, faction territories and private room descriptions. B/X stocking and dungeon depth still govern contents and treasure. Applies on Generate.');
       OPTS.level=String(bxDungeonLevel(OPTS));mkSel('level','Dungeon level',Array.from({length:9},(_,i)=>[String(i+1),'Level '+(i+1)]),'Dungeon depth for B/X monsters and treasure; this is not a party-level or encounter-balance setting. Applies on Generate.');
       mkSel('layout','Layout',[['compact','Connected chambers'],['scattered','Scattered rooms']],'Connected chambers grow in a compact architectural plan around a larger hall. Scattered rooms retain the earlier open layout.');
       mkSel('density','Density',[['sparse','Sparse'],['normal','Normal'],['dense','Dense'],['packed','Packed']]);
@@ -2708,7 +2793,7 @@ function genDun(seedArg){
 
   function placeKeysAndFeatures(){   // key (number) per room: a free corner-ish cell, away from doors; a feature symbol in non-stair rooms
     const feats=['Chest1x1','Altar1x1','Fountain1x1','Statue1x1','Cask1x1','Trap1x1','TableRound1x1','Bookcase1x1','CoffinClosed1x1','Loot1x1','Grave1x1'].filter(n=>BY.dungeon[n]);
-    const keyAt=[], keyByRoom=[],stocking=makeDungeonStock(seed,rooms);
+    const keyAt=[], keyByRoom=[],population={},stocking=makeDungeonStock(seed,rooms,population);
     const furnish=m=>{
       // A blanket halo made every interior cell of a 3×3 room unavailable. Protect the actual
       // doorway and its inward approach, then prove furniture leaves the whole room traversable.
@@ -2771,7 +2856,7 @@ function genDun(seedArg){
       if(stock.kind==='trap'){stock.trapPosition=stock.hasTreasure?stock.treasurePosition:markStock(rooms[i],key,'trap');stock.trapMarked=!!stock.trapPosition;
         if(!stock.hasTreasure&&!stock.trapPosition)stock.trapPosition=[Math.floor((key.x-L.ox)/L.cell)+1,Math.floor((key.y-L.oy)/L.cell)+1];}
     }
-    stockDungeonKeys(seed,rooms,order.filter(i=>keyAt[i]),stocking);
+    stockDungeonKeys(seed,rooms,order.filter(i=>keyAt[i]),stocking,population);
     if(compact){ const uses={hall:'Pillared hall',gallery:'Long gallery',guard:'Guardroom',storage:'Store room',shrine:'Side shrine',rest:'Resting chamber',archive:'Archive'};
       rooms.forEach((m,i)=>{const key=keyByRoom[i];if(!key)return; if(i!==primary)key.name=uses[m.role]||key.name; key.notes+='\n\nRoom use: '+(uses[m.role]||'Chamber')+'. Furnishings leave the doors and a route across the room clear.';}); }
     // A lock is an obstacle with a usable key, not a random hard stop. Walk the actual

@@ -84,3 +84,8 @@ are referee selections, not a reproduction of the published wandering tables.
 Room descriptions, traps, specials, selection code and dice logic are original.
 Rulebook illustrations, descriptive monster text and full combat entries are not
 included. Magic results identify the required B/X item-table rolls.
+
+The inhabitant motif control in [Donjon's fantasy dungeon generator](https://donjon.bin.sh/fantasy/dungeon/)
+inspired the dungeon-wide population approach. Faction identities, motives,
+territory assignment, relationships, room activities and population code here
+are original; Donjon's source, tables and generated text are not included.

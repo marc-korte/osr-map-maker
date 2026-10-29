@@ -55,7 +55,9 @@ tabs when updating to a new release, and keep a JSON backup before upgrading.
   districts, countryside approaches, optional walls, and river crossings or a
   coastal harbor. **Street layout → Varied** chooses a seeded plan: organic
   lanes, a roadside high street, clustered districts, market spokes, or planned
-  blocks. Each plan varies within its family. Pick a specific layout to explore
+  blocks. Clustered districts use staggered neighborhood lanes and small public
+  pockets, with varied connections instead of repeated ring-and-X junctions.
+  Each plan varies within its family. Pick a specific layout to explore
   that style; **Current layout** identifies the existing map. Changing this
   option takes effect on the next generation and preserves the current map.
   Streets and banks divide actual blocks, then properties receive street
@@ -111,8 +113,8 @@ tabs when updating to a new release, and keep a JSON backup before upgrading.
 - **GM / Player view:** GM-only items (and GM-only layers) disappear from the
   Player view, its key, and its PNG export. **Export PNG** is up to 300 dpi and
   never includes selection highlights.
-- **Adventure keys:** generated dungeons have private room names, a shared
-  faction and hook, and B/X room stocking. Choose **Room theme** (keep, crypt,
+- **Adventure keys:** generated dungeons have private room names, inhabitants,
+  factions and a hook, and B/X room stocking. Choose **Dungeon theme** (keep, undead crypt,
   temple or cavern hideout) and **Dungeon level** (depth 1–9).
   Generated wilderness settlements and landmarks are numbered, with private
   briefs covering services, residents, trouble, and rumors pointing to actual
@@ -133,6 +135,12 @@ tabs when updating to a new release, and keep a JSON backup before upgrading.
   treasure on 1–3 for monsters, 1–2 for traps, or 1 for empty rooms. Specials
   have no automatic treasure. Small dungeons may vary substantially from the
   average; the generator does not force a quota or cycle through room types.
+  Inhabitants share a dungeon-wide population plan. Where occupied rooms permit,
+  factions claim connected territories through the actual passages, with motives,
+  resources and ways to negotiate. The entrance key summarizes these groups;
+  individual rooms explain their ownership, purpose and current activity.
+  Empty rooms remain unoccupied, with signs of nearby residents. Wandering
+  encounters use the established populations. Undead crypts keep undead residents.
   Monster choices use original themed lists of B/X creatures, with group sizes
   adjusted for depth. A successful monster-room treasure check rolls one group
   cache using its lair treasure type, including any fixed extra gold, rather
@@ -185,11 +193,13 @@ town.js           # original settlement geometry and canvas cartography
 tests/town.test.cjs # Node tests for town geometry, layers and rendering contracts
 tests/town-variety.test.cjs # Actual street topology, layout replay and spatial safety
 tests/town-realism.test.cjs # Blocks, property use, compounds, farmland and bounded rendering
+tests/town-streets.test.cjs # Neighborhood topology, open plaza joins and fitted market details
 tests/town-import.test.cjs # Production land-record sanitation, ownership and privacy repair
 tests/town-engine.test.cjs # Missing-engine edit guards, recovery and inherited privacy
 tests/wilderness.test.cjs # Node tests for road/river geometry, bridges and climate
 tests/dungeon.test.cjs # Node tests for dungeon routes, entrances and GM notes
 tests/dungeon-stocking.test.cjs # B/X stocking, treasure, private markers and depth controls
+tests/dungeon-population.test.cjs # Themed rosters, actual-floor territories and faction notes
 tests/storage.test.cjs # Node tests for autosave conflicts and migration recovery
 maps/             # Python icon/map generators (dev tooling, not part of the site)
 .github/workflows/

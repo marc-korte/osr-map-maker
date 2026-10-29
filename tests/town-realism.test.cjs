@@ -1,6 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const Town = require('../town.js');
 
 const layouts = ['organic', 'linear', 'clustered', 'radial', 'planned'];
@@ -136,6 +138,23 @@ test('realism geometry proof distinguishes shared boundaries, overlapping land, 
   assert(!contained([[1, 1], [8, 1], [1, 8]], concave, .001), 'an edge crossing an indentation is not contained');
   const samples = cyclicStreetSamples({ unit: 1, walls: [], boundary: [[0, 0], [100, 0], [100, 100], [0, 100]], roads: [{ pts: [[0, 50], [100, 50]] }, { pts: [[50, 50], [50, 75]] }] });
   assert(samples.length >= 6 && samples.every(p => Math.abs(p[1] - 50) < .001), 'through-street proof recognizes a real land division and excludes its culdesac branch');
+});
+
+test('a closed street loop reached by a single neck remains a hole in the surrounding block', () => {
+  // Exercise the production partitioner with a minimal graph rather than a
+  // particular town blueprint. Test-only access leaves the shipped API intact.
+  const source = fs.readFileSync(require.resolve('../town.js'), 'utf8');
+  const sandbox = { module: { exports: {} } };
+  vm.runInNewContext(source.replace('const api = { generate,', 'const api = { streetBlocks, generate,'), sandbox);
+  const boundary = [[0, 0], [200, 0], [200, 200], [0, 200]];
+  const loop = [[60, 100], [100, 60], [140, 100], [100, 140], [60, 100]];
+  const roads = [{ pts: [[0, 100], [60, 100]] }, { pts: loop }, { pts: [[100, 60], [100, 40]] }];
+  const blocks = sandbox.module.exports.streetBlocks(roads, boundary, [], 1);
+  assert.equal(blocks.length, 2, 'the loop divides its own land from its surrounding neighborhood');
+  assert(Math.abs(blocks.reduce((sum, block) => sum + area(block.polygon), 0) - 40000) < 1e-7, 'the inner loop is subtracted from the surrounding block instead of counting its land twice');
+  for (const point of [[100, 100], [40, 40]]) assert.equal(blocks.filter(block => strictlyInside(point, block.polygon, .001)).length, 1, 'each dry interior point belongs to exactly one block');
+  assert(!interiorsOverlap(blocks[0].polygon, blocks[1].polygon, .001), 'the surrounding face preserves its hole');
+  assert(blocks.every(block => block.polygon.every(point => distance(point, [100, 40]) > .001)), 'a terminal branch remains a street reservation, not a retraced block boundary');
 });
 
 for (const layout of layouts) test(`${layout}: actual blocks, frontage properties, houses and yards fit the street plan`, () => {

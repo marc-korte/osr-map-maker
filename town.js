@@ -177,18 +177,20 @@
         edgeKeys.add(key); const id = edges.length; edges.push({ a, b }); nodes[a].edges.push(id); nodes[b].edges.push(id);
       }
     }
-    const discovery = [], low = [], bridges = new Set(); let clock = 0;
-    const visit = (at, parent) => {
-      discovery[at] = low[at] = ++clock;
-      for (const id of nodes[at].edges) {
-        if (id === parent) continue;
-        const edge = edges[id], next = edge.a === at ? edge.b : edge.a;
-        if (!discovery[next]) { visit(next, id); low[at] = Math.min(low[at], low[next]); if (low[next] > discovery[at]) bridges.add(id); }
-        else low[at] = Math.min(low[at], discovery[next]);
-      }
-    };
-    for (let i = 0; i < nodes.length; i++) if (!discovery[i]) visit(i, -1);
-    const outgoing = nodes.map((n, at) => n.edges.filter(id => !bridges.has(id)).map(id => {
+    // Remove terminal branches, but retain a neck joining two cyclic parts of
+    // the network. The surrounding face must follow that neck around the inner
+    // loop and back; dropping every graph bridge would fill its hole, producing
+    // an outer block that overlaps the separately emitted inner loop block.
+    const degree = nodes.map(n => n.edges.length), leaves = [], deadEnds = new Set();
+    for (let i = 0; i < nodes.length; i++) if (degree[i] === 1) leaves.push(i);
+    for (const at of leaves) {
+      if (degree[at] !== 1) continue;
+      const id = nodes[at].edges.find(edge => !deadEnds.has(edge));
+      const edge = edges[id], next = edge.a === at ? edge.b : edge.a;
+      deadEnds.add(id); degree[at]--; degree[next]--;
+      if (degree[next] === 1) leaves.push(next);
+    }
+    const outgoing = nodes.map((n, at) => n.edges.filter(id => !deadEnds.has(id)).map(id => {
       const edge = edges[id], to = edge.a === at ? edge.b : edge.a;
       return { id, to, angle: Math.atan2(nodes[to].point[1] - n.point[1], nodes[to].point[0] - n.point[0]) };
     }).sort((a, b) => a.angle - b.angle));
@@ -575,34 +577,81 @@
       if (size !== 'village' || random() < .6) entrance(grid.at(-1)[Math.min(count - 1, mainColumn + 1)], Math.PI / 2 + bend(), 'south-grid');
       if (size === 'city' && random() < .5) entrance(grid[count - 2][0], Math.PI * .85, 'old-grid');
     } else if (layout === 'clustered') {
-      const count = size === 'village' ? 2 : 3;
-      const local = [[-.36 + bend(), -.29 + bend()], [.37 + bend(), .10 + bend()], [-.18 + bend(), .48 + bend()]].slice(0, count);
-      const centers = local.map(world), loops = [];
-      for (let i = 0; i < centers.length; i++) {
-        const p = centers[i], x = local[i][0], y = local[i][1];
-        const sx = .25 + random() * .045, sy = .28 + random() * .045;
-        const corners = [[x - sx, y - sy], [x + sx, y - sy], [x + sx, y + sy], [x - sx, y + sy]].map(point => bounded(...point));
-        loops.push(corners);
-        street(corners.concat([corners[0]]), 7.5);
-        // Each neighborhood grows around its own small, dry public square.
-        const square = { id: 'local-square-' + i, x: p[0], y: p[1], polygon: rectangle(p[0], p[1], 43 * unit, 35 * unit, bend()) };
-        if (water.every(body => polygonClearance(square.polygon, body.polygon) > 3 * unit)) plazas.push(square);
-        street([corners[0], p, corners[2]], 8);
-        street([corners[3], p, corners[1]], 6.5);
-        const outside = bounded(x + (x < 0 ? -.24 : .24), y + bend());
-        street([p, outside], 10, 'primary');
-        entrance(outside, angleAt(outside), square.id);
+      // Neighborhood lanes follow older property boundaries. Cross lanes meet
+      // them at staggered T junctions: no repeated boxes with an X through each
+      // square, and no single hub receiving every district and gate road.
+      const rowCount = (size === 'village' ? 3 : size === 'city' ? 5 : 4) + Math.floor(random() * 2);
+      const columns = size === 'city' ? 7 : 6, rows = [], rowWidths = [], rowJoins = [];
+      const mainRow = Math.floor((rowCount - 1) / 2);
+      for (let r = 0; r < rowCount; r++) {
+        const y = -.70 + r * 1.40 / (rowCount - 1);
+        const extent = .80 * Math.sqrt(1 - (y / 1.02) ** 2);
+        const drift = Math.sin(r * 1.3 + phase) * .075;
+        const row = Array.from({ length: columns }, (_, c) => {
+          const t = c / (columns - 1);
+          const x = lerp(-extent, extent, t) + drift + (c && c < columns - 1 ? bend() * .85 : 0);
+          return bounded(x, y + Math.sin(t * Math.PI * 1.4 + phase + r * .8) * .075 + bend() * .55);
+        });
+        rows.push(row);
+        rowWidths.push(r === mainRow ? 12 : 6.5 + random() * 2);
+        rowJoins.push([]);
       }
-      street([center, centers[0]], 10, 'primary', { from: 'market', to: 'old-square' });
-      for (let i = 1; i < centers.length; i++) street([centers[i - 1], mixPoint(centers[i - 1], centers[i], .5), centers[i]], 12, 'primary');
-      street([loops[0][1], loops[1][0]], 6, 'lane');
-      if (centers.length > 2) street([loops[2][0], loops[0][3]], 6, 'lane');
-      const north = loops[0][1];
-      entrance(north, -Math.PI / 2 + bend(), 'north-neighborhood');
-      if (size !== 'village' || waterKind === 'coast') {
-        const south = loops.at(-1)[2];
-        entrance(south, Math.PI / 2 + bend(), 'south-neighborhood');
+      // A connector joins the actual piecewise street, not a nearby sample.
+      // Its next neighbor lands elsewhere, leaving long usable block fronts
+      // instead of making a four-way crossing at every road bend.
+      const onRow = (row, fraction) => {
+        const at = clamp(fraction, 0, 1) * (row.length - 1), i = Math.min(row.length - 2, Math.floor(at));
+        return mixPoint(row[i], row[i + 1], at - i);
+      };
+      const joins = [];
+      for (let r = 1; r < rows.length; r++) {
+        const fractions = r % 2 ? [.12, .46, .85] : [.23, .61, .93];
+        if (random() < .28) fractions.splice(random() < .5 ? 0 : 2, 1);
+        for (let i = 0; i < fractions.length; i++) {
+          const fraction = fractions[i] + bend() * .7;
+          const nextFraction = fraction + (i % 2 ? -.045 : .045);
+          const a = onRow(rows[r - 1], fraction), b = onRow(rows[r], nextFraction);
+          // Keep a simple dry-bank connection; street() clips any proposal
+          // crossing water and the shared connectivity pass drops fragments.
+          street([a, b], i === 1 ? 7 : 5.5, 'lane');
+          joins.push({ point: a, row: r - 1, fraction });
+          joins.push({ point: b, row: r, fraction: nextFraction });
+          rowJoins[r - 1].push(fraction); rowJoins[r].push(nextFraction);
+        }
       }
+      for (let r = 0; r < rows.length; r++) {
+        // Local streets finish at their last junction, rather than leaving
+        // rounded strips of paving projecting into otherwise empty land.
+        const lo = r === mainRow ? 0 : Math.min(...rowJoins[r]);
+        const hi = r === mainRow ? 1 : Math.max(...rowJoins[r]);
+        const pts = [onRow(rows[r], lo)].concat(rows[r].filter((p, i) => i / (columns - 1) > lo && i / (columns - 1) < hi), [onRow(rows[r], hi)]);
+        street(pts, rowWidths[r], r === mainRow ? 'primary' : 'street', { from: 'neighborhood-' + r });
+      }
+      const marketJoin = onRow(rows[mainRow], .49);
+      street([center, marketJoin], 8, 'street', { from: 'market', to: 'old-road' });
+      const pocket = (id, point, breadth, depth) => {
+        const x = point[0], y = point[1] - depth * .24;
+        const polygon = convexHull([[-.52, -.30], [.12, -.53], [.54, -.13], [.38, .45], [-.43, .39]].map(([dx, dy]) => [x + dx * breadth, y + dy * depth]));
+        if (polygon.every(p => pointInPolygon(p, boundary)) && water.every(body => polygonClearance(polygon, body.polygon) > 3 * unit)) {
+          return { id, x, y, polygon };
+        }
+        return null;
+      };
+      const marketPocket = pocket('market', center, 56 * unit, 42 * unit);
+      if (marketPocket) Object.assign(plaza, marketPocket);
+      // Modest public pockets belong beside different neighborhood junctions,
+      // rather than identical large rectangular pads stamped over the roads.
+      for (const join of joins) {
+        if (join.row !== mainRow && (join.fraction <= Math.min(...rowJoins[join.row]) + .01 || join.fraction >= Math.max(...rowJoins[join.row]) - .01)) continue;
+        if (dist(join.point, center) < 90 * unit || plazas.some(p => dist(join.point, [p.x, p.y]) < 125 * unit)) continue;
+        const square = pocket('local-square-' + (plazas.length - 1), join.point, (25 + random() * 8) * unit, (21 + random() * 6) * unit);
+        if (square) plazas.push(square);
+        if (plazas.length >= (size === 'village' ? 3 : 4)) break;
+      }
+      entrance(rows[mainRow][0], Math.PI + bend(), 'old-road-west');
+      entrance(rows[mainRow].at(-1), bend(), 'old-road-east');
+      entrance(onRow(rows[0], rowJoins[0][Math.floor(rowJoins[0].length / 2)]), -Math.PI / 2 + bend(), 'north-neighborhood');
+      if (size !== 'village' || waterKind === 'coast') entrance(onRow(rows.at(-1), rowJoins.at(-1)[Math.floor(rowJoins.at(-1).length / 2)]), Math.PI / 2 + bend(), 'south-neighborhood');
     } else {
       // Irregular neighborhoods branch off an older winding route. Selective
       // local links make loops without imposing concentric rings or a star.
@@ -1190,19 +1239,24 @@
       for (const parcel of data.parcels || []) if (propertyVisible(parcel)) {
         trace(ctx, parcel.polygon, true); ctx.strokeStyle = style.muted; ctx.lineWidth = .55 * u; ctx.stroke();
       }
-      // Outlines first and interiors second keep crossroads fully open.
+      // Streets and public spaces form one open surface. Paint all outlines
+      // before either interior, so a square's edge cannot close a through road
+      // and a road edge cannot cut a dark stripe across the square.
+      for (const square of data.plazas || [data.plaza]) {
+        trace(ctx, square.polygon, true); ctx.strokeStyle = INK; ctx.lineWidth = 1.1 * u; ctx.stroke();
+      }
       for (const road of data.roads) if (visible(road)) {
         ctx.lineCap = road.kind === 'approach' ? 'butt' : 'round';
         strokeLine(ctx, road.pts, selectedId === road.id ? style.selection : INK, road.width + (selectedId === road.id ? 3 : 1.1) * u);
+      }
+      for (const square of data.plazas || [data.plaza]) {
+        trace(ctx, square.polygon, true); ctx.fillStyle = PAPER; ctx.fill();
       }
       for (const road of data.roads) if (visible(road)) {
         ctx.lineCap = road.kind === 'approach' ? 'butt' : 'round';
         strokeLine(ctx, road.pts, PAPER, road.width);
       }
       ctx.lineCap = 'round';
-      for (const square of data.plazas || [data.plaza]) {
-        trace(ctx, square.polygon, true); ctx.fillStyle = PAPER; ctx.fill(); ctx.strokeStyle = style.muted; ctx.lineWidth = .9 * u; ctx.stroke();
-      }
       for (const dock of data.docks || []) {
         trace(ctx, dock.polygon, true); ctx.fillStyle = PAPER; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = .9 * u; ctx.stroke();
         for (let t = .13; t < 1; t += .14) strokeLine(ctx, [mixPoint(dock.polygon[0], dock.polygon[1], t), mixPoint(dock.polygon[3], dock.polygon[2], t)], style.muted, .6 * u);
@@ -1263,9 +1317,20 @@
       }
       // A well and a few stalls make the reserved market space legible at any zoom.
       const cx = data.plaza.x, cy = data.plaza.y;
-      ctx.beginPath(); ctx.arc(cx - 17 * u, cy + 9 * u, 4 * u, 0, TAU); ctx.fillStyle = style.shade; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = .8 * u; ctx.stroke();
-      for (let i = -1; i <= 1; i++) {
-        const stall = rectangle(cx + i * 15 * u, cy - 16 * u, 9 * u, 5 * u, 0);
+      let marketFixtures = null;
+      for (const scale of [1, .85, .7, .55]) {
+        const s = u * scale, well = { x: cx - 17 * s, y: cy + 9 * s, radius: 4 * s };
+        const stalls = [-1, 0, 1].map(i => rectangle(cx + i * 15 * s, cy - 16 * s, 9 * s, 5 * s, 0));
+        // Keep the complete well and stall footprints inside the reserved
+        // public land, including smaller irregular or imported market places.
+        const wellBox = rectangle(well.x, well.y, well.radius * 2 + u, well.radius * 2 + u, 0);
+        if ([wellBox, ...stalls].every(polygon => polygonContains(data.plaza.polygon, polygon))) { marketFixtures = { well, stalls }; break; }
+      }
+      if (marketFixtures) {
+        const well = marketFixtures.well;
+        ctx.beginPath(); ctx.arc(well.x, well.y, well.radius, 0, TAU); ctx.fillStyle = style.shade; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = .8 * u; ctx.stroke();
+      }
+      for (const stall of marketFixtures?.stalls || []) {
         trace(ctx, stall, true); ctx.fillStyle = PAPER; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = .6 * u; ctx.stroke();
         strokeLine(ctx, [mixPoint(stall[0], stall[1], .5), mixPoint(stall[3], stall[2], .5)], style.muted, .6 * u);
       }

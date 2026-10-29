@@ -1,4 +1,81 @@
-# Release review · 2026-10-28
+# Release review · 2026-10-29
+
+## Coherent dungeon inhabitants
+
+B/X still determines each room's contents and treasure presence. A separate,
+seeded population plan now supplies the context: coherent resident rosters,
+connected territories, motives, supplies or undead bindings, and bargaining
+levers. The existing **Dungeon theme** setting chooses these populations;
+**Undead crypt** keeps all resident creatures undead. Donjon's inhabitant motif
+control provided inspiration; the faction material and code are original.
+
+Territories follow the floor actually carved, with room interiors contracted
+into chambers. Corridor repairs and loops therefore affect territory, while
+proposed but uncarved routes cannot create access. Factions begin in occupied
+rooms. A small or unoccupied dungeon does not gain a rival or extra residents to
+meet a quota, and isolated pockets do not acquire imaginary patrol connections.
+
+The entrance's private key contains a dungeon brief and actual keyed territories.
+Room duties follow their architectural roles; scattered rooms distinguish former
+use from current purpose. Empty rooms retain their B/X category and show signs
+of nearby inhabitants. Resource or binding locations refer to owned rooms.
+Relationships for undead describe ritual conflicts and competing directives,
+including mindless watches that cannot converse or make political promises.
+
+Wandering entries borrow creatures from actual keyed resident groups, identify
+their source and territory, and account for creatures being away or defeated.
+Both factions receive entries where present. If no entry is eligible, use an
+atmospheric event. Additional lair hoards and unrolled reinforcements are not
+created. The ordinary editable GM notes persist in saved maps; no second faction
+graph is saved or silently rebuilt after manual edits.
+
+Focused tests cover actual floor connectivity, folded and disconnected routes,
+coherent rosters, undead behavior, empty/single-group dungeons, reordered keys,
+role-based duties, patrol sources, RNG isolation and handwritten legacy notes.
+A packed 48×48 Jaquays fixture preserves bounded notes and complete access/route
+instructions through production JSON migration.
+
+Final validation: `node scripts/validate.cjs` passes **333 tests across eleven
+suites**, including twenty population tests and eleven town-street regressions.
+Native Chrome passes **2,473 desktop** and **2,475 phone-size** checks. The theme
+selector, generated faction brief and phone note editor were inspected in the
+browser; the temporary viewport was reset. Focused Codex review has no unresolved
+findings after fixing mindless-undead diplomacy and a lone band's phantom rival.
+
+![Dungeon brief with actual keyed faction territory](review/dungeon-population-brief.png)
+
+![Private faction notes on a phone](review/dungeon-population-mobile.png)
+
+## Town street layout correction · 2026-10-29
+
+The reported clustered town, seed `qexzcjcp`, repeated rectangular street rings
+with both diagonals through each center. This created six- and seven-way hubs,
+triangular lots and oversized square junctions. Clustered neighborhoods now use
+irregular lanes with staggered connections and modest public pockets. Local
+streets finish at junctions; countryside approaches still reach the map frame.
+
+Public spaces and streets paint one open surface, so plaza outlines no longer
+close road entrances. Market wells and stalls fit their reserved public land.
+The new topology also exposed an existing block-partition bug: dropping every
+graph bridge filled holes around inner street loops. The partitioner now removes
+terminal branches while retaining connections between closed loops.
+
+The reported seed now has a maximum of four street arms per junction and three
+triangular faces among thirteen blocks, compared with sixteen among thirty-five
+previously. New generation changes this seed's automatic title from Thornwick
+to Alderwick. Existing saved town geometry is retained.
+
+Eleven dedicated street regressions cover actual junction topology, bends and
+small-jitter counterexamples, public-space painting, fitted market details and
+replay. A separate synthetic loop-and-neck fixture proves blocks partition
+40,000 square units exactly; the old result double-counted 3,200 square units.
+Native desktop Chrome passes 2,473 checks. Before/after browser inspection uses
+the reported seed and settings; the earlier image is at Fit and the newer detail
+is zoomed in to inspect its junctions.
+
+![Reported clustered street pattern](review/town-streets-before.png)
+
+![Revised connected neighborhood streets](review/town-streets-after.png)
 
 ## B/X dungeon population
 
@@ -36,7 +113,7 @@ force an extra guardian, treasure cache or scripted encounter into an empty room
 
 Validation:
 
-- The complete `node scripts/validate.cjs` gate passes **301 tests** across nine
+- At that review, `node scripts/validate.cjs` passed **301 tests** across nine
   suites, including **22 B/X stocking tests** and **67 dungeon regressions**.
   Exact die/percentile boundaries, all depth bands, independent components,
   magic-bundle restrictions, Nil treasure, repeatability and RNG isolation pass.

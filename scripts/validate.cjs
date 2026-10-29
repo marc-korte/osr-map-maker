@@ -26,7 +26,7 @@ assert.ok(inlineScripts > 0, 'the app inline script must be checked');
 assert.ok(assets.has('icons.js') && assets.has('town.js'), 'both map engines must be present');
 console.log(`Syntax and runtime asset checks passed (${inlineScripts} inline script).`);
 
-for (const file of ['tests/town.test.cjs', 'tests/town-variety.test.cjs', 'tests/town-realism.test.cjs', 'tests/town-import.test.cjs', 'tests/town-engine.test.cjs', 'tests/wilderness.test.cjs', 'tests/dungeon.test.cjs', 'tests/storage.test.cjs']) {
+for (const file of ['tests/town.test.cjs', 'tests/town-variety.test.cjs', 'tests/town-realism.test.cjs', 'tests/town-import.test.cjs', 'tests/town-engine.test.cjs', 'tests/wilderness.test.cjs', 'tests/dungeon.test.cjs', 'tests/dungeon-stocking.test.cjs', 'tests/storage.test.cjs']) {
   const result = spawnSync(process.execPath, [path.join(root, file)], { cwd: root, stdio: 'inherit' });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status || 1);

@@ -68,3 +68,19 @@ and [Dyson Logos's Autumn Lands](https://dysonlogos.blog/2025/01/15/the-autumn-l
 roads connect useful destinations through terrain and passes, and map symbols
 represent regions rather than literal barriers. No artwork or source code from
 these maps is included.
+
+## B/X dungeon stocking
+
+Dungeon room stocking implements the numerical procedures in Moldvay Basic
+(B52) and Cook/Marsh Expert (X53), cross-checked against Necrotic Gnome's official
+B/X-compatible rules reference: [dungeon design and room stocking](https://www.oldschoolessentials.necroticgnome.com/rules/doku.php?id=running_adventures:designing_a_dungeon),
+[treasure types](https://www.oldschoolessentials.necroticgnome.com/rules/doku.php?id=treasures:treasure_types),
+[gem and jewellery values](https://www.oldschoolessentials.necroticgnome.com/rules/doku.php?id=treasures:gems_and_jewellery),
+and [dungeon exploration](https://www.oldschoolessentials.necroticgnome.com/rules/doku.php?id=adventuring:dungeon_adventuring).
+The original B52 die-face order is retained; OSE rearranges those faces while
+keeping the same probabilities. B/X creature names, Hit Dice, morale and treasure
+type references inform original themed room lists and depth adjustments. These
+are referee selections, not a reproduction of the published wandering tables.
+Room descriptions, traps, specials, selection code and dice logic are original.
+Rulebook illustrations, descriptive monster text and full combat entries are not
+included. Magic results identify the required B/X item-table rolls.

@@ -1,5 +1,58 @@
 # Release review · 2026-10-28
 
+## B/X dungeon population
+
+Room notes previously cycled six prompt categories while scattered-map symbols
+rolled unrelated treasure and traps. Stocking now uses the original B52 d6
+contents order and independent conditional treasure checks. Every room has one
+local resolved record, shared by its private notes and any secret cache/trap
+marker. Ordinary decoration cannot inject extra random loot or hazards.
+
+Dungeon depth 1–9 selects the B/X unguarded treasure band and informs original
+themed creature lists. Monster notes include group size, HD, morale and the B/X
+entry reference. Guarded caches roll the selected creature's lair treasure type
+and fixed gold bonus once per group; empty/trapped caches use the depth table.
+Coin/gem/jewellery results are concrete. Magic bundles preserve category
+restrictions and refer to the B/X item tables for final item resolution. These
+lists and group-size adjustments are original referee choices, not a copied
+random-encounter table or an automatic party-balancing system.
+
+Trap descriptions give clues, triggers, consequences and bypasses. The review
+caught a trapped coffer's trap icon being placed on a different square. Trapped
+caches now have one private chest marker; room-trap and coffer trigger coordinates
+come from actual placement. If no stamp fits, contents remain in the ordinary
+key, using a wall cache or the key's nonsolid floor square. Door approaches,
+room circulation, reachable lock keys and Jaquays notes remain intact.
+
+Contents and treasure-presence rolls are independent of theme/depth. All
+stocking uses separate RNG streams; generic decoration preserves its previous
+geometry-RNG draw count. Theme/depth changes therefore keep room geometry and
+marker positions. Saved/manual notes are not restocked during load. Player
+images, legends and exports omit private markers and GM notes.
+
+The entrance key includes an original six-entry wandering table plus B/X time,
+encounter, reaction and optional morale reminders. Its hook does not secretly
+force an extra guardian, treasure cache or scripted encounter into an empty room.
+
+Validation:
+
+- The complete `node scripts/validate.cjs` gate passes **301 tests** across nine
+  suites, including **22 B/X stocking tests** and **67 dungeon regressions**.
+  Exact die/percentile boundaries, all depth bands, independent components,
+  magic-bundle restrictions, Nil treasure, repeatability and RNG isolation pass.
+- Both layouts and cramped-room fixtures prove private marker/key agreement,
+  single trapped-cache markers, exact trigger coordinates, JSON preservation,
+  Player-view privacy and theme/depth geometry invariance. A first-level crypt
+  can select ordinary 1 HD skeletons instead of only stronger undead.
+- Native Chrome passes **2,473 desktop** and **2,475 phone-size** checks, including
+  the actual depth selector, numeric imports, migration and native Player canvas
+  omission of secret cache/trap assets. No browser warnings or errors were seen;
+  the verified temporary phone viewport was reset.
+- Focused Codex review found the trap-location issue described above and confirmed
+  its fix. Syntax, runtime assets, workflow lint and whitespace checks pass.
+
+![B/X room contents and private notes](review/bx-room-key.png)
+
 ## Geography-first wilderness roads
 
 The previous road changes passed geometric safety tests but still looked like

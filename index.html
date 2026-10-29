@@ -327,7 +327,7 @@ function nextKeyNumber(mode=M.mode){const group=keyGroups(M).find(group=>group.m
 function allocateKeyNumber(mode=M.mode){const group=keyGroups(M).find(group=>group.mode===mode);if(!ensureKeyNumbers()||M[group.counter]>MAX_KEY_NUMBER){toast('No new location number is available. Save a backup and start a new map.');return null;}const n=M[group.counter];M[group.counter]=n+1;return n;}
 // generate-option defaults, shared by buildTools (which seeds the <select>s) and the generators
 const WILD_OPTS_DEF={geography:'regions',climate:'temperate',water:'normal',terrain:'normal',settlements:'some',features:'some',rivers:'some'};
-const DUN_OPTS_DEF={layout:'compact',density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes',jaquay:'no',theme:'keep'};
+const DUN_OPTS_DEF={layout:'compact',density:'normal',roomSize:'medium',corridors:'winding',deadends:'some',stairs:'yes',jaquay:'no',theme:'keep',level:'1'};
 const TOWN_OPTS_DEF={size:'town',layout:'varied',water:'river',walls:'yes',density:'normal'};
 const MODE_FIELDS={wild:{cols:'colsW',rows:'rowsW',title:'titleW',seed:'seedW',last:'lastSeedW',auto:'autoTitleW',min:WILD_MIN,label:'Wilderness'},dun:{cols:'colsD',rows:'rowsD',title:'titleD',seed:'seedD',last:'lastSeedD',auto:'autoTitleD',min:DUN_MIN,label:'Dungeon'},town:{cols:'colsT',rows:'rowsT',title:'titleT',seed:'seedT',last:'lastSeedT',auto:'autoTitleT',min:TOWN_MIN,label:'Town'}};
 const modeFields=(mode=M.mode)=>typeof mode==='string'&&Object.hasOwn(MODE_FIELDS,mode)?MODE_FIELDS[mode]:MODE_FIELDS.wild;
@@ -988,36 +988,169 @@ function legendDun(g,ax,ay){ const keyed=hasKeys(), lines=legendLineRows(g,M.dra
 
 // ---------- room keys: private adventure notes travel with their numbered markers ----------
 const DUN_THEMES={
-  keep:{label:'Ruined keep',rooms:['Guardroom','Collapsed barracks','Old kitchen','Audience hall','Armory','Prison cells'],faction:'A band of scavengers claims the keep and fears something beneath it.',goal:'Recover the missing castellan’s seal from the innermost chamber.',detail:['Rain drips through cracked stone.','A cold hearth smells of old smoke.','Fresh bootprints cross the dust.']},
-  crypt:{label:'Ancient crypt',rooms:['Burial vault','Mourning chamber','Ossuary','Embalming room','Ancestor shrine','Sealed sepulcher'],faction:'Tomb robbers and the restless dead compete for the same relic.',goal:'Return a stolen funerary relic to its resting place, or carry it out.',detail:['Scraped dust reveals recent visitors.','Faded names cover the walls.','An unseen draft moves funeral ribbons.']},
-  temple:{label:'Lost temple',rooms:['Offering hall','Pilgrim quarters','Ritual chamber','Reliquary','Sacred well','Oracle chamber'],faction:'Exiled acolytes want their sanctuary back without waking its guardian.',goal:'Find the sanctuary’s central relic and decide who should keep it.',detail:['Broken mosaics depict a forgotten rite.','The air carries a faint scent of incense.','Water echoes somewhere beyond the walls.']},
-  cavern:{label:'Cavern hideout',rooms:['Lookout den','Mushroom garden','Smuggler cache','Flooded hollow','Bone cavern','Hidden refuge'],faction:'Smugglers share these excavated caverns with an unwelcome predator.',goal:'Locate the lost courier’s cache before the smugglers move it.',detail:['Pale fungus lights old tool marks.','A damp breeze carries distant voices.','Dragged crates leave tracks in the grit.']}
+  keep:{label:'Ruined keep',rooms:['Guardroom','Collapsed barracks','Old kitchen','Audience hall','Armory','Prison cells'],faction:'A band of scavengers claims the keep and fears something beneath it.',goal:'Discover what drove the keep’s household from their stronghold.',detail:['Rain drips through cracked stone.','A cold hearth smells of old smoke.','Fresh bootprints cross the dust.']},
+  crypt:{label:'Ancient crypt',rooms:['Burial vault','Mourning chamber','Ossuary','Embalming room','Ancestor shrine','Sealed sepulcher'],faction:'Tomb robbers and the restless dead compete for the same relic.',goal:'Learn whose remains were disturbed and settle the ensuing unrest.',detail:['Scraped dust reveals recent visitors.','Faded names cover the walls.','An unseen draft moves funeral ribbons.']},
+  temple:{label:'Lost temple',rooms:['Offering hall','Pilgrim quarters','Ritual chamber','Reliquary','Sacred well','Oracle chamber'],faction:'Exiled acolytes want their sanctuary back without waking its guardian.',goal:'Uncover the abandoned sanctuary’s purpose and who still serves it.',detail:['Broken mosaics depict a forgotten rite.','The air carries a faint scent of incense.','Water echoes somewhere beyond the walls.']},
+  cavern:{label:'Cavern hideout',rooms:['Lookout den','Mushroom garden','Smuggler cache','Flooded hollow','Bone cavern','Hidden refuge'],faction:'Smugglers share these excavated caverns with an unwelcome predator.',goal:'Trace the missing courier’s route through the caves.',detail:['Pale fungus lights old tool marks.','A damp breeze carries distant voices.','Dragged crates leave tracks in the grit.']}
 };
+// B/X stocking and unguarded treasure; every die uses the caller's seeded stream.
+function bxDungeonLevel(options){
+  const value=options&&options.level;
+  const level=typeof value==='number'||typeof value==='string'&&value.trim()!==''?Number(value):NaN;
+  return Number.isFinite(level)?Math.max(1,Math.min(9,Math.floor(level))):1;
+}
+function bxRoll(rng,sides){ return 1+Math.floor(rng()*sides); }
+function bxRoomContents(rng){
+  const contentRoll=bxRoll(rng,6),kind=contentRoll<=2?'monster':contentRoll===3?'trap':contentRoll===4?'special':'empty';
+  const treasureRoll=kind==='special'?null:bxRoll(rng,6);
+  const threshold=kind==='monster'?3:kind==='trap'?2:kind==='empty'?1:0;
+  return {kind,contentRoll,treasureRoll,hasTreasure:treasureRoll!==null&&treasureRoll<=threshold};
+}
+const BX_UNGUARDED_TREASURE=[
+  {maxLevel:1,spDie:6,spScale:100,gpChance:50,gpScale:10,gemChance:5,jewelChance:2,magicChance:2,quantityDie:6},
+  {maxLevel:3,spDie:12,spScale:100,gpChance:50,gpScale:100,gemChance:10,jewelChance:5,magicChance:8,quantityDie:6},
+  {maxLevel:5,spDie:6,spScale:1000,gpChance:100,gpScale:200,gemChance:20,jewelChance:10,magicChance:10,quantityDie:6},
+  {maxLevel:7,spDie:6,spScale:2000,gpChance:100,gpScale:500,gemChance:30,jewelChance:15,magicChance:15,quantityDie:6},
+  {maxLevel:9,spDie:6,spScale:5000,gpChance:100,gpScale:1000,gemChance:40,jewelChance:20,magicChance:20,quantityDie:12}
+];
+function bxUnguardedTreasure(level,rng){
+  const depth=bxDungeonLevel({level}),table=BX_UNGUARDED_TREASURE.find(row=>depth<=row.maxLevel);
+  const chance=percent=>percent===100||bxRoll(rng,100)<=percent;
+  const coins={sp:bxRoll(rng,table.spDie)*table.spScale,gp:0},gems=[],jewellery=[];
+  if(chance(table.gpChance))coins.gp=bxRoll(rng,6)*table.gpScale;
+  if(chance(table.gemChance)){
+    const count=bxRoll(rng,table.quantityDie);
+    for(let i=0;i<count;i++){const roll=bxRoll(rng,20);gems.push(roll<=4?10:roll<=9?50:roll<=15?100:roll<=19?500:1000);}
+  }
+  if(chance(table.jewelChance)){
+    const count=bxRoll(rng,table.quantityDie);
+    for(let i=0;i<count;i++)jewellery.push((bxRoll(rng,6)+bxRoll(rng,6)+bxRoll(rng,6))*100);
+  }
+  return {coins,gems,jewellery,magicItems:chance(table.magicChance)?1:0};
+}
+const BX_LAIR_TREASURE={
+  B:{coins:{cp:[50,1,8],sp:[25,1,6],ep:[25,1,4],gp:[25,1,3]},gems:[25,1,6],jewellery:[25,1,6],magicChance:10,magicItems:1,magicNotes:['1 sword, suit of armour, or weapon: roll on the corresponding B/X magic-item table']},
+  C:{coins:{cp:[20,1,12],sp:[30,1,4],ep:[10,1,4]},gems:[25,1,4],jewellery:[25,1,4],magicChance:10,magicItems:2,magicNotes:['2 items: roll each on the B/X magic-item tables']},
+  D:{coins:{cp:[10,1,8],sp:[15,1,12],gp:[60,1,6]},gems:[30,1,8],jewellery:[30,1,8],magicChance:15,magicItems:3,magicNotes:['2 items: roll each on the B/X magic-item tables','1 potion: roll on the B/X potion table']},
+  E:{coins:{cp:[5,1,10],sp:[30,1,12],ep:[25,1,4],gp:[25,1,8]},gems:[10,1,10],jewellery:[10,1,10],magicChance:25,magicItems:4,magicNotes:['3 items: roll each on the B/X magic-item tables','1 scroll: roll on the B/X scroll table']},
+  F:{coins:{sp:[10,2,10],ep:[20,1,8],gp:[45,1,12],pp:[30,1,3]},gems:[20,2,12],jewellery:[10,1,12],magicChance:30,magicItems:5,magicNotes:['3 non-weapon items: roll on the B/X magic-item tables, excluding swords and other weapons','1 potion: roll on the B/X potion table','1 scroll: roll on the B/X scroll table']}
+};
+function bxLairTreasure(type,rng,bonusGP=0){
+  const code=String(type).toUpperCase();if(code==='NIL'||code==='NONE')return {coins:{cp:0,sp:0,ep:0,gp:0,pp:0},gems:[],jewellery:[],magicItems:0,magicNotes:[]};
+  const table=BX_LAIR_TREASURE[code];
+  if(!table)throw new RangeError('Unsupported B/X treasure type: '+type);
+  const chance=percent=>bxRoll(rng,100)<=percent;
+  const dice=(count,sides)=>{let sum=0;for(let i=0;i<count;i++)sum+=bxRoll(rng,sides);return sum;};
+  const coins={cp:0,sp:0,ep:0,gp:0,pp:0},gems=[],jewellery=[];
+  for(const [coin,[percent,count,sides]] of Object.entries(table.coins))if(chance(percent))coins[coin]=dice(count,sides)*1000;
+  // A monster group's extra gold belongs to this one hoard, regardless of group size.
+  const bonus=Number(bonusGP);if(Number.isFinite(bonus))coins.gp+=Math.max(0,Math.floor(bonus));
+  if(chance(table.gems[0])){
+    const count=dice(table.gems[1],table.gems[2]);
+    for(let i=0;i<count;i++){const roll=bxRoll(rng,20);gems.push(roll<=4?10:roll<=9?50:roll<=15?100:roll<=19?500:1000);}
+  }
+  if(chance(table.jewellery[0])){
+    const count=dice(table.jewellery[1],table.jewellery[2]);
+    for(let i=0;i<count;i++)jewellery.push(dice(3,6)*100);
+  }
+  const magic=chance(table.magicChance);
+  return {coins,gems,jewellery,magicItems:magic?table.magicItems:0,magicNotes:magic?table.magicNotes.slice():[]};
+}
+function bxTreasureText(loot){
+  const parts=[];
+  for(const coin of ['cp','sp','ep','gp','pp'])if(loot.coins[coin])parts.push(loot.coins[coin]+' '+coin);
+  if(loot.gems.length)parts.push(loot.gems.length+' '+(loot.gems.length===1?'gem':'gems')+' ('+loot.gems.map(value=>value+' gp').join(', ')+')');
+  if(loot.jewellery.length)parts.push(loot.jewellery.length+' '+(loot.jewellery.length===1?'piece':'pieces')+' of jewellery ('+loot.jewellery.map(value=>value+' gp').join(', ')+')');
+  if(loot.magicItems)parts.push(loot.magicItems+' magic '+(loot.magicItems===1?'item':'items')+': '+(loot.magicNotes&&loot.magicNotes.length?loot.magicNotes.join('; '):'roll on B/X magic-item tables'));
+  return parts.length?parts.join('; ')+'.':'No treasure.';
+}
 function dungeonKeys(){ return M.syms.filter(s=>s.type==='key'); }
 function adventureKeys(){ return M.mode==='dun'?dungeonKeys():M.mode==='town'?(M.town&&M.town.sites||[]):M.sites.filter(s=>s.kind!=='place'&&!s.water); }
-function stockDungeonKeys(seed,rooms,order){
+// Original themed room lists use B/X creature references; these are not the
+// published wandering tables. Counts describe the group in this room, while a
+// successful treasure check supplies one communal cache, never one per creature.
+const BX_ROOM_MONSTERS=[
+  {name:'Skeleton',hd:'1',tier:1,na:[3,4],morale:12,treasureType:'Nil',themes:['crypt','temple']},
+  {name:'Goblin',hd:'1-1',tier:1,na:[2,4],morale:7,treasureType:'C',themes:['keep','cavern']},
+  {name:'Orc',hd:'1',tier:1,na:[2,4],morale:6,treasureType:'D',themes:['keep','temple','cavern']},
+  {name:'Gnoll',hd:'2',tier:2,na:[1,6],morale:8,treasureType:'D',themes:['keep','temple','cavern']},
+  {name:'Ghoul',hd:'2*',tier:2,na:[1,6],morale:9,treasureType:'B',themes:['crypt','temple']},
+  {name:'Bugbear',hd:'3+1',tier:3,na:[2,4],morale:9,treasureType:'B',themes:['keep','cavern']},
+  {name:'Wight',hd:'3*',tier:3,na:[1,6],morale:12,treasureType:'B',themes:['crypt','temple']},
+  {name:'Ogre',hd:'4+1',tier:4,na:[1,6],morale:10,treasureType:'C',bonusGP:1000,themes:['keep','cavern']},
+  {name:'Wraith',hd:'4**',tier:4,na:[1,4],morale:12,treasureType:'E',themes:['crypt','temple']},
+  {name:'Mummy',hd:'5+1*',tier:5,na:[1,4],morale:12,treasureType:'D',themes:['crypt','temple']},
+  {name:'Minotaur',hd:'6',tier:6,na:[1,6],morale:12,treasureType:'C',themes:['keep','temple','cavern']},
+  {name:'Troll',hd:'6+3*',tier:6,na:[1,8],morale:10,treasureType:'D',themes:['keep','cavern']},
+  {name:'Vampire',hd:'7-9**',tier:8,na:[1,4],morale:11,treasureType:'F',themes:['keep','crypt','temple']},
+  {name:'Hill giant',hd:'8',tier:8,na:[1,4],morale:8,treasureType:'E',bonusGP:5000,themes:['keep','temple','cavern']},
+  {name:'Stone giant',hd:'9',tier:9,na:[1,2],morale:9,treasureType:'E',bonusGP:5000,themes:['keep','temple','cavern']}
+];
+function bxDungeonTheme(){const theme=(M.dunOpts||{}).theme;return typeof theme==='string'&&Object.hasOwn(DUN_THEMES,theme)?theme:'keep';}
+function bxMonsterGroup(level,theme,rng){
+  const near=BX_ROOM_MONSTERS.filter(monster=>Math.abs(monster.tier-level)<=2),themed=near.filter(monster=>monster.themes.includes(theme)),pool=themed.length?themed:near;
+  const weights=pool.map(monster=>1/(1+Math.abs(monster.tier-level))**2);let roll=rng()*weights.reduce((a,b)=>a+b,0),monster=pool[pool.length-1];
+  for(let i=0;i<pool.length;i++){roll-=weights[i];if(roll<0){monster=pool[i];break;}}
+  let base=0;for(let i=0;i<monster.na[0];i++)base+=bxRoll(rng,monster.na[1]);
+  // B/X advises more creatures below their HD level and fewer above it. This
+  // original encounter list applies that guideline to the normal dungeon count.
+  const delta=level-monster.tier,count=delta>=0?base*(delta+1):Math.max(1,Math.ceil(base/(1-delta)));
+  return {...monster,count};
+}
+function makeDungeonStock(seed,rooms){
+  const level=bxDungeonLevel(M.dunOpts),theme=bxDungeonTheme();
+  return rooms.map((room,i)=>{const contents=bxRoomContents(mulberry32(hashSeed(seed+'|bx-contents|'+i))),encounter=mulberry32(hashSeed(seed+'|bx-encounter|'+theme+'|'+level+'|'+i)),treasure=mulberry32(hashSeed(seed+'|bx-treasure|'+i)),stock={...contents,level,monster:null,loot:null};
+    if(stock.kind==='monster')stock.monster=bxMonsterGroup(level,theme,encounter);
+    if(stock.hasTreasure)stock.loot=stock.monster?bxLairTreasure(stock.monster.treasureType,treasure,stock.monster.bonusGP||0):bxUnguardedTreasure(level,treasure);
+    return stock;
+  });
+}
+function stockDungeonKeys(seed,rooms,order,stocking=makeDungeonStock(seed,rooms)){
   ensureKeyNumbers(M,'dun');
-  // A separate stream means adding/editing the adventure never changes the map's geometry or title RNG.
-  const requested=(M.dunOpts||{}).theme, theme=typeof requested==='string'&&Object.hasOwn(DUN_THEMES,requested)?requested:'keep';
-  const rng=mulberry32(hashSeed(seed+'|room-key|'+theme)), choose=a=>a[Math.floor(rng()*a.length)];
-  const T=DUN_THEMES[theme], keys=dungeonKeys(), offset=Math.floor(rng()*6);
-  keys.forEach((key,n)=>{ const m=rooms[order[n]]; if(!m)return;
+  const theme=bxDungeonTheme(),rng=mulberry32(hashSeed(seed+'|room-key|'+theme)),choose=a=>a[Math.floor(rng()*a.length)],T=DUN_THEMES[theme],keys=dungeonKeys(),offset=Math.floor(rng()*6);
+  const empty=['Dust records earlier visitors, but nothing is living here now.','A cold hearth and abandoned bedding mark an old resting place.','Water stains and scraps of ordinary pottery are all that remain.','The room is quiet; its furniture is worn and has no unusual properties.'];
+  const specials=[
+    'Special: a stone face whispers the last word spoken here when a hand covers its eyes. Uncovering them stops it. A polished patch on the brow hints at the interaction; it conceals no cache.',
+    'Special: shadows on the west wall count the living creatures in the room, regardless of where the light stands. Covering the painted sun above them ends the effect. Testing it can expose a hidden living visitor; it creates no creature or treasure.',
+    'Special: a wall basin shows the weather outside when filled with clean water. The image lasts one turn, then the water turns cloudy. Emptying and refilling it repeats the effect without a charge or reward.',
+    'Special: a brass mouth echoes every sentence one turn after it was spoken. A cloth gag silences it. Old cloth scraps below the mouth show how earlier explorers controlled the noise; no hidden compartment lies behind it.',
+    'Special: a painted doorway vanishes under warm breath and returns after one round. It is paint over solid masonry, not an exit or a passage to another area. Copper scrape marks reveal earlier attempts to pry it open.',
+    'Special: loose pebbles roll uphill across a narrow wall shelf. Removing a pebble restores ordinary gravity; replacing it repeats the effect. The room floor and its exits work normally.'
+  ];
+  const roomTraps=[
+    'A taut line crosses the keyed trigger flagstone. Pulling or stepping on it can release a ceiling weight: 1d10 damage; save versus petrification to avoid it. Fresh stone chips reveal the danger. Wedge the weight or cut the line from cover; it must be manually reset.',
+    'The keyed pressure plate connects to a spring dart in a low stone socket. Loose plaster and a tiny round opening warn of it. Pressing the plate can fire one dart for 1d4 damage, with no attack roll. A piton wedged under the plate disables it; it fires once until reloaded.',
+    'A cord stretched between two low pegs at the keyed trigger can ring an alarm. A bright wear mark on the cord is visible on inspection. If sprung, immediately make one wandering-monster check. Tie the clapper or step over the cord; it resets while the cord remains taut.',
+    'The keyed flagstone covers a pressurised poison reservoir. A sharp smell and green stains give warning. Pressing the stone can release gas: save versus poison or die. Plug the visible vent before pressing it; the reservoir is a single charge.'
+  ];
+  const treasureTraps=[
+    'The strongbox latch has a dark pinhole beneath it. Opening it can drive a poisoned needle into the opener: save versus poison or die. Probe the latch from the side and immobilise the spring with a thin wedge; it must be manually reset.',
+    'Fine wire runs from the strongbox lid into its hinge. Opening it can fire a spring dart for 1d4 damage, with no attack roll. Clamp the hinge and cut the exposed wire before lifting the lid; it fires once until reloaded.',
+    'A cloudy crystal is set behind the strongbox lock. Opening the lid can produce a blinding flash: save versus spells or be blinded for 1d8 turns. Cover the crystal with an opaque cloth before opening the box; after flashing it remains dark until the next day.'
+  ];
+  keys.forEach((key,n)=>{const i=order[n],m=rooms[i],stock=stocking[i];if(!m||!stock)return;
     key.name=n===0?'Entrance · '+T.label:T.rooms[(n-1+offset)%T.rooms.length];
-    const situations=[
-      choose(['Occupied: two hungry lookouts argue over stolen supplies. Food buys safe passage; a loud fight alerts their allies.','Occupied: a wounded guard tends a frightened animal. Help earns directions; a threat sends the animal into the passage.','Occupied: rival scavengers inventory a find. They will trade a share for help carrying it out, but fear being followed.']),
-      choose(['Hazard: a loose flagstone clicks under pressure. Scrapes beneath a ceiling weight give warning; a wedge disables the trigger. The weight falls once and must be lifted to reset.','Hazard: green residue stains a sealed jar. Removing its lid releases choking dust; a wet cloth over the mouth contains it. The jar holds only one charge.','Hazard: a frayed cord crosses the doorway at ankle height. Tripping it rings a distant bell; tying off the clapper allows quiet passage. The bell can ring again until secured.']),
-      choose(['Trick: a stone basin reflects the room as it once was. Adding water reveals a concealed inscription; removing the water ends the vision.','Discovery: footprints stop at a wall painted with stars. Pressing the worn star opens a tiny cache; nothing happens if the others are pressed.','Trick: a bronze face repeats the last sentence spoken nearby in a different voice. Its noise can distract a guard or betray a careless party.']),
-      choose(['Treasure: a coffer is wedged behind fallen stone. Pulling it free makes noise; its owner left a recognizable mark. Set its value for the party.','Treasure: silver wire binds a damaged ceremonial object. Salvaging the wire is easy; restoring the object could earn a faction’s gratitude.','Treasure: a wax-sealed map case lies in a shallow pool. Its brittle contents identify a lost supply cache; careful drying preserves the directions.']),
-      choose(['Quiet: abandoned bedding and tracks reveal recent use. This could be a resting place if the entrances are watched.','Quiet: an old workshop holds repair tools and usable timber. Taking time here can solve an equipment problem, but fresh sawdust reveals the visit.','Quiet: a faded roster records former inhabitants and a familiar family name. A surviving relative may value this history more than treasure.']),
-      choose(['Social: a stranded rival offers a useful rumor in exchange for an escort. They know a route but conceal why they came.','Social: a nervous courier hides from both factions. Delivering their message earns an ally and risks angering its intended recipient.','Social: an injured delver asks for water and knows a warning about a nearby hazard. Their abandoned pack offers a second reason to return.'])
-    ];
-    const parts=[choose(T.detail),situations[(n+offset)%situations.length]];
-    if(n===0)parts.unshift('Hook: '+T.goal,'Faction: '+T.faction,'Arrival: tracks lead inward; let the party choose a route and retreat.');
-    if(n===keys.length-1&&n>0)parts.push('Objective: the destination of the entrance hook. Add a guardian, cost, or negotiation suited to your group.');
-    const L=layout(), inside=s=>s.icon&&s.x>=L.ox+m.x*L.cell&&s.x<L.ox+(m.x+m.w)*L.cell&&s.y>=L.oy+m.y*L.cell&&s.y<L.oy+(m.y+m.h)*L.cell;
-    const features=M.syms.filter(inside).map(s=>s.structure==='column'?'Column':(BY.dungeon[s.icon]||{}).label||s.icon);
-    if(features.length)parts.push('Map features: '+[...new Set(features)].join(', ')+'.');
+    const kind=stock.kind.charAt(0).toUpperCase()+stock.kind.slice(1),parts=['B/X contents: '+kind+'.','Dungeon level: '+stock.level+'.',choose(T.detail)];
+    if(n===0)parts.push('Hook: '+T.goal,'Faction: '+T.faction,'Arrival: tracks lead inward; let the party choose a route and retreat.');
+    if(stock.kind==='monster'){const monster=stock.monster;parts.push('Encounter: '+monster.count+' × '+monster.name+'. B/X HD '+monster.hd+'; ML '+monster.morale+'. Use the B/X '+monster.name+' entry for attacks, saves, movement and special abilities. These are the room occupants, not the total population of the lair.');
+      const undead=['Skeleton','Ghoul','Wight','Wraith','Mummy','Vampire'].includes(monster.name);
+      parts.push(undead?'Behaviour: these undead guard their resting place. Check their B/X entry for senses, immunities and the conditions under which they pursue intruders.':choose(['Behaviour: the occupants are sorting supplies and prefer a warning to a costly fight. A useful offer gives a reason to parley.','Behaviour: the occupants argue over duties. They want a quiet watch and can be distracted or bargained with.','Behaviour: the occupants are repairing equipment. They protect their territory but have a practical use for outsiders.'])+' If their response is uncertain, roll the B/X 2d6 reaction check when the party engages them.');
+      if(stock.hasTreasure&&monster.treasureType==='Nil')parts.push('Treasure: none. This creature has no B/X lair treasure. The indicated strongbox is empty; do not invent a hoard for it.');
+      else if(stock.hasTreasure)parts.push('Treasure: one communal type '+monster.treasureType+' lair cache'+(monster.bonusGP?' plus '+monster.bonusGP+' gp':'')+', already rolled for this area: '+bxTreasureText(stock.loot)+' Keep this as the group’s hoard, not an amount per creature. The cache is in a concealed strongbox.');
+      else parts.push('Treasure: none. The room’s treasure check failed; do not add a fresh lair hoard for every creature.');
+    }else if(stock.kind==='trap'){
+      parts.push('Trap: '+choose(stock.hasTreasure?treasureTraps:roomTraps)+' Each exposure to its trigger springs the trap on 1–2 on d6 (2-in-6); damage is automatic unless the listed saving throw prevents it.');
+      parts.push(stock.hasTreasure?'Treasure: '+bxTreasureText(stock.loot)+' It is secured inside the trapped strongbox.':'Treasure: none. This is a room trap, not a trapped treasure cache.');
+    }else if(stock.kind==='special'){parts.push(choose(specials),'Treasure: none from random stocking. This feature carries no automatic monetary or magic-item reward.');}
+    else {parts.push('Empty: '+choose(empty)+' There is no resident monster or random room trap.');parts.push(stock.hasTreasure?'Treasure: '+bxTreasureText(stock.loot)+' A strongbox is concealed behind loose masonry; scrape marks and disturbed dust reveal where to search.':'Treasure: none. Ordinary furnishings and architectural routes may still be present.');}
+    if(stock.hasTreasure&&!stock.treasureMarked)parts.push('Cache location: the strongbox is built into the wall recess, rather than occupying a separate floor square.');
+    if(stock.kind==='trap'){const pos=stock.trapPosition;parts.push(stock.hasTreasure?(pos?'Trap location: the strongbox latch at column '+pos[0]+', row '+pos[1]+'. The chest marker represents the trapped cache.':'Trap location: the concealed wall-strongbox latch; there is no separate floor trigger.'):(pos?'Trap location: column '+pos[0]+', row '+pos[1]+'. The mechanism is flush with the floor.':'Trap location: a flagstone in the numbered area.'));}
+    const L=layout(),inside=s=>s.icon&&s.x>=L.ox+m.x*L.cell&&s.x<L.ox+(m.x+m.w)*L.cell&&s.y>=L.oy+m.y*L.cell&&s.y<L.oy+(m.y+m.h)*L.cell;
+    const features=M.syms.filter(inside).map(s=>s.structure==='column'?'Column':(BY.dungeon[s.icon]||{}).label||s.icon);if(features.length)parts.push('Map features: '+[...new Set(features)].join(', ')+'.');
     if((M.dunOpts||{}).jaquay!=='yes'&&n+1<keys.length)parts.push('Lead: evidence here points toward area '+keyNumberValue(keys[n+1],n+2)+'.');
+    if(n===0){const patrol=mulberry32(hashSeed(seed+'|bx-wandering|'+theme+'|'+stock.level)),table=Array.from({length:6},(_,die)=>{const monster=bxMonsterGroup(stock.level,theme,patrol);return (die+1)+': '+monster.count+' × '+monster.name+' (HD '+monster.hd+', ML '+monster.morale+').';});
+      parts.push('B/X exploration: one turn is 10 minutes. Check for wandering monsters every two turns, 1-in-6; on an encounter roll d6 on the list below. Encounter distance is 2d6 × 10 ft. These are wandering groups, without additional lair hoards.\n'+table.join('\n'),'Reactions: when uncertain, roll 2d6: 2 attacks, 3–5 may attack, 6–8 wary, 9–11 neutral, 12 cooperative; apply the situation and applicable modifiers. Use the creature’s entry when it establishes a fixed response.','Optional morale: roll 2d6 at the first casualty and when half the group is out of the fight; above ML means retreat or surrender. ML 12 does not roll; after two successful checks the group keeps fighting for this encounter.');
+    }
     key.notes=parts.join('\n\n');
   });
 }
@@ -1090,7 +1223,7 @@ function editRoomKey(key,returnFocusKey){
 function gmRoomKeyText(){
   if(M.view!=='gm')return '';
   const clean=v=>String(v||'').replace(/[\r\n]+/g,' ').replace(/[#*`\[\]<>]/g,'').trim();
-  const parts=['# '+clean(M.title),'GM ONLY · Adventure prompts; choose game statistics and rewards for your party.',M.mode==='town'?'Town width: '+fmtScale(M.cols*mapScale())+' ft.':'Scale: '+fmtScale(mapScale())+(M.mode==='wild'?' miles per hex.':' ft per square.')];
+  const parts=['# '+clean(M.title),M.mode==='dun'?'GM ONLY · Dungeon key. New dungeon generation uses B/X stocking; consult B/X monster entries and resolve listed magic items.':'GM ONLY · Adventure prompts; choose game statistics and rewards for your party.',M.mode==='town'?'Town width: '+fmtScale(M.cols*mapScale())+' ft.':'Scale: '+fmtScale(mapScale())+(M.mode==='wild'?' miles per hex.':' ft per square.')];
   const seed=M[modeFields().last]; if(seed)parts.push('Seed: '+clean(seed));
   adventureKeys().forEach((k,i)=>parts.push('## '+keyNumberValue(k,i+1)+'. '+(clean(k.name||k.label)||'Untitled area')+(M.mode==='wild'?' · Hex '+hexId(k.c,k.r):''),String(k.notes||'No notes yet.')));
   return parts.join('\n\n')+'\n';
@@ -1101,7 +1234,7 @@ const keySearch={wild:'',dun:'',town:''};
 function buildRoomKeyPanel(d){
   const hint=document.createElement('p'); hint.className='panel-copy'; d.appendChild(hint);
   if(M.view!=='gm'){ hint.textContent='Names and adventure notes are private. Switch to GM view to edit or export this key.'; return; }
-  const keys=adventureKeys(); hint.textContent=keys.length?'Select an area to edit its private name and notes. Generated prompts need your game’s stats and treasure.':(M.mode==='dun'?'Generate a dungeon or place Keyed # markers':M.mode==='town'?'Generate a town or add Keyed places':'Generate wilderness or place Keyed site markers')+' to build your adventure key.';
+  const keys=adventureKeys(); hint.textContent=keys.length?(M.mode==='dun'?'Select an area to edit its private B/X contents, treasure and notes. Use B/X monster entries and resolve listed magic items.':'Select an area to edit its private name and notes. Generated prompts need your game’s stats and treasure.'):(M.mode==='dun'?'Generate a dungeon or place Keyed # markers':M.mode==='town'?'Generate a town or add Keyed places':'Generate wilderness or place Keyed site markers')+' to build your adventure key.';
   if(!keys.length)return;
   const exp=document.createElement('button'); exp.className='key-export'; exp.dataset.k='key:export'; exp.textContent='Export GM key (.md)'; exp.onclick=exportRoomKey; d.appendChild(exp);
   const label=document.createElement('label'); label.className='key-search'; label.append(M.mode==='dun'?'Find a room':'Find a site');
@@ -1265,7 +1398,8 @@ function buildTools(){
       mkSel('density','Buildings',[['sparse','Sparse'],['normal','Normal'],['dense','Dense']]);
       if(M.town)note(d,'Current layout: '+(layouts.find(([value])=>value===M.town.layout)?.[1]||'Market spokes (older map)')+'.');
     } else if(M.mode==='dun'){
-      mkSel('theme','Room theme',[['keep','Ruined keep'],['crypt','Ancient crypt'],['temple','Lost temple'],['cavern','Cavern hideout']],'Names and system-neutral GM prompts. Geometry uses the size and corridor settings below.');
+      mkSel('theme','Room theme',[['keep','Ruined keep'],['crypt','Ancient crypt'],['temple','Lost temple'],['cavern','Cavern hideout']],'Original themed B/X encounter lists and private room descriptions. Geometry uses the settings below.');
+      OPTS.level=String(bxDungeonLevel(OPTS));mkSel('level','Dungeon level',Array.from({length:9},(_,i)=>[String(i+1),'Level '+(i+1)]),'Dungeon depth for B/X monsters and treasure; this is not a party-level or encounter-balance setting. Applies on Generate.');
       mkSel('layout','Layout',[['compact','Connected chambers'],['scattered','Scattered rooms']],'Connected chambers grow in a compact architectural plan around a larger hall. Scattered rooms retain the earlier open layout.');
       mkSel('density','Density',[['sparse','Sparse'],['normal','Normal'],['dense','Dense'],['packed','Packed']]);
       mkSel('roomSize','Room size',[['small','Small'],['medium','Medium'],['large','Large']]);
@@ -2574,7 +2708,7 @@ function genDun(seedArg){
 
   function placeKeysAndFeatures(){   // key (number) per room: a free corner-ish cell, away from doors; a feature symbol in non-stair rooms
     const feats=['Chest1x1','Altar1x1','Fountain1x1','Statue1x1','Cask1x1','Trap1x1','TableRound1x1','Bookcase1x1','CoffinClosed1x1','Loot1x1','Grave1x1'].filter(n=>BY.dungeon[n]);
-    const keyAt=[], keyByRoom=[];
+    const keyAt=[], keyByRoom=[],stocking=makeDungeonStock(seed,rooms);
     const furnish=m=>{
       // A blanket halo made every interior cell of a 3×3 room unavailable. Protect the actual
       // doorway and its inward approach, then prove furniture leaves the whole room traversable.
@@ -2604,7 +2738,7 @@ function genDun(seedArg){
         put(mx,m.y+1,'Throne1x1');
       } else if(m.role==='shrine'){ put(mx,my,'Altar1x1'); if(m.w>=5){put(m.x+1,m.y+1,'Bench1x1');put(m.x+m.w-2,m.y+1,'Bench1x1');} }
       else if(m.role==='storage'){ for(const[c,r]of[[m.x+1,m.y+1],[m.x+m.w-2,m.y+1],[m.x+1,m.y+m.h-2]])put(c,r,'Cask1x1'); }
-      else if(m.role==='archive'){ for(let r=m.y+1;r<m.y+m.h-1;r+=2)put(m.x+1,r,'Bookcase1x1',90); put(m.x+m.w-2,m.y+m.h-2,'Chest1x1'); }
+      else if(m.role==='archive'){ for(let r=m.y+1;r<m.y+m.h-1;r+=2)put(m.x+1,r,'Bookcase1x1',90); put(m.x+m.w-2,m.y+m.h-2,'Bookcase1x1'); }
       else if(m.role==='rest'){ put(m.x+1,m.y+1,'Bed1x1',90); if(m.h>=5)put(m.x+1,m.y+m.h-2,'Bed1x1',90); }
       else if(m.role==='guard'){ put(mx,my,'TableSquare1x1'); if(m.w>=5){put(mx-1,my,'Chair1x1',90);put(mx+1,my,'Chair1x1',270);} }
       else if(m.role==='gallery'&&Math.min(m.w,m.h)>=3){ put(m.x+1,m.y+1,'StatueSmall1x1'); if(Math.max(m.w,m.h)>=7)put(m.x+m.w-2,m.y+m.h-2,'StatueSmall1x1'); }
@@ -2612,14 +2746,32 @@ function genDun(seedArg){
     rooms.forEach((m,i)=>{ if(compact)furnish(m); const cxx=cx(m)-0.5, cyy=cy(m)-0.5;
       let fc=freeCells(m); if(!fc.length)fc=roomCells(m).filter(([c,r])=>!occupied.has(c+','+r));
       if(fc.length){ let best=fc[0],bs=-1; for(const[c,r]of fc){const sc=(compact?-1:1)*((c-cxx)**2+(r-cyy)**2) + Math.min(9,doorDist(m,c,r))*0.3; if(sc>bs){bs=sc;best=[c,r];}} keyAt[i]=take(best[0],best[1]); }
-      if(!compact&&i!==0&&i!==farI&&feats.length){ const fc2=freeCells(m); if(fc2.length){ let best=fc2[0],bd=1e9; for(const[c,r]of fc2){const d=(c-cxx)**2+(r-cyy)**2; if(d<bd){bd=d;best=[c,r];}} const p=take(best[0],best[1]), icon=pick(feats); M.syms.push({x:p[0],y:p[1],icon,...(isDungeonSecret(icon)?{gm:true}:{})}); } } });
+      if(!compact&&i!==0&&i!==farI&&feats.length){ const fc2=freeCells(m); if(fc2.length){ let best=fc2[0],bd=1e9; for(const[c,r]of fc2){const d=(c-cxx)**2+(r-cyy)**2; if(d<bd){bd=d;best=[c,r];}} const p=take(best[0],best[1]),rolled=pick(feats),icon=/^(Chest|Loot|Trap)/.test(rolled)?dnm('Cask1x1','Bookcase1x1'):rolled; M.syms.push({x:p[0],y:p[1],icon,...(isDungeonSecret(icon)?{gm:true}:{})}); } } });
     // key numbers follow a walk from the entrance (nearest unvisited room next): 1 is the way in and the numbers read
     // across the map like a module's key, instead of jumping around in placement order. No RNG → seeds unchanged.
     const entry=jaquaysRoutes.find(r=>r.kind==='entrance'&&r.method==='tunnel'),primary=entry?entry.a:0;
     const order=[primary], left=new Set(rooms.map((_,i)=>i).filter(i=>i!==primary));
     while(left.size){ const a=rooms[order[order.length-1]]; let bj=-1,bd=1e18; for(const j of left){ const d=(cx(a)-cx(rooms[j]))**2+(cy(a)-cy(rooms[j]))**2; if(d<bd){bd=d;bj=j;} } order.push(bj); left.delete(bj); }
     for(const i of order) if(keyAt[i]){ const key={x:keyAt[i][0],y:keyAt[i][1],type:'key'}; keyByRoom[i]=key; M.syms.push(key); }
-    stockDungeonKeys(seed,rooms,order.filter(i=>keyAt[i]));
+    ensureKeyNumbers(M,'dun');
+    // Contents and the private key share one resolved stock record. Secret
+    // markers use remaining safe floor; a crowded cache can live in a wall niche.
+    const markStock=(m,key,kind,trapCache=false)=>{const icon=kind==='treasure'?'Chest1x1':'Trap1x1';if(!BY.dungeon[icon])return null;
+      const cells=roomCells(m),cellKey=(c,r)=>c+','+r,blocked=new Set();
+      for(const symbol of M.syms){if(!symbol.furnishing&&!/^(Chest|Altar|Fountain|Statue|Cask|Table|Bookcase|Coffin|Grave)/.test(symbol.icon||''))continue;
+        const c=Math.floor((symbol.x-L.ox)/L.cell),r=Math.floor((symbol.y-L.oy)/L.cell);if(c>=m.x&&c<m.x+m.w&&r>=m.y&&r<m.y+m.h)blocked.add(cellKey(c,r));}
+      const candidates=freeCells(m).sort((a,b)=>a[1]-b[1]||a[0]-b[0]);
+      for(const[c,r]of candidates){const allowed=new Set(cells.filter(([x,y])=>!blocked.has(cellKey(x,y))&&(x!==c||y!==r)).map(([x,y])=>cellKey(x,y)));if(!allowed.size)continue;
+        const first=allowed.values().next().value,seen=new Set(),stack=[first];while(stack.length){const here=stack.pop();if(seen.has(here))continue;seen.add(here);const[x,y]=here.split(',').map(Number);for(const[dx,dy]of DIRS){const next=cellKey(x+dx,y+dy);if(allowed.has(next)&&!seen.has(next))stack.push(next);}}
+        if(seen.size!==allowed.size)continue;const[x,y]=take(c,r);M.syms.push({x,y,icon,gm:true,stocking:kind,stockArea:key.n,...(trapCache?{stockTrap:true}:{})});return [c+1,r+1];
+      }return null;
+    };
+    for(const i of order){const key=keyByRoom[i],stock=stocking[i];if(!key)continue;
+      if(stock.hasTreasure){stock.treasurePosition=markStock(rooms[i],key,'treasure',stock.kind==='trap');stock.treasureMarked=!!stock.treasurePosition;}
+      if(stock.kind==='trap'){stock.trapPosition=stock.hasTreasure?stock.treasurePosition:markStock(rooms[i],key,'trap');stock.trapMarked=!!stock.trapPosition;
+        if(!stock.hasTreasure&&!stock.trapPosition)stock.trapPosition=[Math.floor((key.x-L.ox)/L.cell)+1,Math.floor((key.y-L.oy)/L.cell)+1];}
+    }
+    stockDungeonKeys(seed,rooms,order.filter(i=>keyAt[i]),stocking);
     if(compact){ const uses={hall:'Pillared hall',gallery:'Long gallery',guard:'Guardroom',storage:'Store room',shrine:'Side shrine',rest:'Resting chamber',archive:'Archive'};
       rooms.forEach((m,i)=>{const key=keyByRoom[i];if(!key)return; if(i!==primary)key.name=uses[m.role]||key.name; key.notes+='\n\nRoom use: '+(uses[m.role]||'Chamber')+'. Furnishings leave the doors and a route across the room clear.';}); }
     // A lock is an obstacle with a usable key, not a random hard stop. Walk the actual
@@ -3185,6 +3337,21 @@ function runTests(){
       ok(gmRoomKeyText().includes('1. The sealed vault')&&gmRoomKeyText().includes('A private clue.'),'GM key export matches map numbering and notes');
       M.view='player'; ok(gmRoomKeyText()===''&&!updateRoomKey(dungeonKeys()[0],'Spoiler','No'),'Player view blocks GM key export and editing');
       M.view='gm'; M.dunOpts=opts;
+    }
+    { // B/X level controls change stocked contents, while native Player canvases omit their secret markers.
+      const before=stateStr(),oldPanel=activePanel,oldExporting=exporting,oldCull=cullRect;
+      try{
+        setMode('dun');M.cols=M.colsD=28;M.rows=M.rowsD=36;M.layers=JSON.parse(M0).layers;M.dunOpts={...DUN_OPTS_DEF};M.view='gm';genDun('bx-stock-a');setPanel('generate');buildTools();
+        const geometry=()=>JSON.stringify({cells:M.cells,syms:M.syms.map(({name,notes,...symbol})=>symbol)}),floor=geometry(),level=document.querySelector('[data-k="opt:level"]');
+        ok(level&&level.value==='1'&&level.options.length===9,'B/X generation exposes dungeon depths 1–9 with level 1 as the default');
+        level.value='3';level.dispatchEvent(new Event('change',{bubbles:true}));genDun('bx-stock-a');
+        ok(M.dunOpts.level==='3'&&dungeonKeys().every(key=>key.notes.startsWith('B/X contents: ')&&key.notes.includes('Dungeon level: 3.'))&&geometry()===floor,'the native Dungeon level control changes B/X contents without changing floor, doors, stairs or stock-marker geometry');
+        const out=document.createElement('canvas');out.width=LW;out.height=LH;const g=out.getContext('2d'),paint=g.drawImage.bind(g),drawn=[];g.drawImage=(source,...args)=>{drawn.push(source);return paint(source,...args);};cullRect=null;exporting=true;
+        const secret=source=>source===MONO.dungeon.Chest1x1||source===MONO.dungeon.Trap1x1;drawDun(g,LW,LH);const gm=drawn.filter(secret).length;drawn.length=0;M.view='player';drawDun(g,LW,LH);
+        ok(M.syms.some(symbol=>symbol.stocking)&&gm>0&&!drawn.some(secret)&&gmRoomKeyText()==='','native Player maps and keys hide generated B/X treasure caches and traps');M.view='gm';
+        const model=JSON.parse(stateStr()),stock=JSON.stringify([M.syms,M.dunOpts]);migrateMap(model);ok(JSON.stringify([model.syms,model.dunOpts])===stock,'B/X notes, dungeon depth and combined trapped-cache markers survive project migration unchanged');
+        M.dunOpts.level=9;buildTools();ok(document.querySelector('[data-k="opt:level"]').value==='9'&&gmRoomKeyText().includes('Dungeon level: 3.'),'numeric imported dungeon depths display correctly without relabeling an already-generated key');
+      }finally{exporting=oldExporting;cullRect=oldCull;M.view=JSON.parse(before).view;restoreState(before);setPanel(oldPanel);}
     }
     // generator invariants (unseeded RNG → assert invariants, not pixels)
     for(let i=0;i<10;i++){ setMode('wild'); genWild(); const L=layout(), RESV=legendReserveWild(L);

@@ -112,19 +112,41 @@ tabs when updating to a new release, and keep a JSON backup before upgrading.
   Player view, its key, and its PNG export. **Export PNG** is up to 300 dpi and
   never includes selection highlights.
 - **Adventure keys:** generated dungeons have private room names, a shared
-  faction and hook, and varied discoveries, hazards, treasure and negotiable
-  encounters. Choose **Room theme** (keep, crypt, temple or cavern hideout).
+  faction and hook, and B/X room stocking. Choose **Room theme** (keep, crypt,
+  temple or cavern hideout) and **Dungeon level** (depth 1–9).
   Generated wilderness settlements and landmarks are numbered, with private
   briefs covering services, residents, trouble, and rumors pointing to actual
   locations on the map. Town locations include services, contacts and adventure
   leads. Open **Room key / Site key · GM notes** to edit an entry, then
-  **Export GM key (.md)** for a table reference. These are
-  system-neutral prompts: supply your game's statistics and treasure values.
+  **Export GM key (.md)** for a table reference. Wilderness and town briefs are
+  system-neutral prompts. Dungeon keys give B/X monster references, group sizes,
+  HD and morale, rolled treasure, and playable traps or specials. Use your B/X
+  monster entries for combat details and resolve any listed magic-item bundles
+  with the B/X item tables.
   Notes persist in autosave, snapshots and JSON backups, and edits support undo.
   Search matches names and notes. Inside the notes dialog, Ctrl/Cmd+S saves the
   note; Escape cancels it and returns focus to the location entry.
   **Save .json includes all GM secrets and notes**, even in Player view; share a
   Player PNG with players instead.
+- **B/X dungeon stocking:** each room rolls independently: 1–2 on d6 means
+  monsters, 3 a trap, 4 a special, and 5–6 an empty room. A second d6 indicates
+  treasure on 1–3 for monsters, 1–2 for traps, or 1 for empty rooms. Specials
+  have no automatic treasure. Small dungeons may vary substantially from the
+  average; the generator does not force a quota or cycle through room types.
+  Monster choices use original themed lists of B/X creatures, with group sizes
+  adjusted for depth. A successful monster-room treasure check rolls one group
+  cache using its lair treasure type, including any fixed extra gold, rather
+  than multiplying a hoard by the number of creatures. Empty/trapped caches use
+  the B/X depth tables; coin amounts, gem/jewellery values and magic bundles are
+  rolled. A lair table can legitimately produce an empty cache. Creatures such
+  as skeletons with Nil treasure do not acquire an invented hoard.
+  Trap and cache markers are private and match the same stocking result as the
+  key. A trapped strongbox has one combined cache marker; trigger coordinates
+  match its actual position. Crowded rooms retain their contents in the key,
+  using a wall cache or the numbered floor square instead of blocking a route.
+  The entrance notes include wandering encounters, reaction and optional morale
+  procedures. Theme/depth changes keep the floor plan and marker locations;
+  regenerate to apply new contents. Existing saved or edited notes are preserved.
 - **Dungeon presentation:** **Map → Rock shading** offers walls-only hatching,
   full rock, or no shading. New maps show a grid on the floors; **Grid
   background** extends it across the rock. Hidden secret doors become solid
@@ -167,6 +189,7 @@ tests/town-import.test.cjs # Production land-record sanitation, ownership and pr
 tests/town-engine.test.cjs # Missing-engine edit guards, recovery and inherited privacy
 tests/wilderness.test.cjs # Node tests for road/river geometry, bridges and climate
 tests/dungeon.test.cjs # Node tests for dungeon routes, entrances and GM notes
+tests/dungeon-stocking.test.cjs # B/X stocking, treasure, private markers and depth controls
 tests/storage.test.cjs # Node tests for autosave conflicts and migration recovery
 maps/             # Python icon/map generators (dev tooling, not part of the site)
 .github/workflows/

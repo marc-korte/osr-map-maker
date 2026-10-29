@@ -1,0 +1,30 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+    paths:
+      - 'index.html'
+      - 'icons.js'
+      - 'town.js'
+      - 'tests/**'
+      - 'scripts/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check app syntax, runtime assets and generator regressions
+        run: node scripts/validate.cjs

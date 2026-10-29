@@ -6,8 +6,11 @@ on:
     paths:
       - 'index.html'
       - 'icons.js'
+      - 'town.js'
       - 'default.conf'
       - 'Dockerfile'
+      - 'scripts/validate.cjs'
+      - '.github/workflows/validate.yml'
       - '.github/workflows/docker-publish.yml'
   workflow_dispatch:
 
@@ -15,8 +18,18 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
+
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+    permissions:
+      contents: read
+
   build:
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

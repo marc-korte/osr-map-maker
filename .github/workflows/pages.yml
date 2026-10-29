@@ -6,7 +6,10 @@ on:
     paths:
       - 'index.html'
       - 'icons.js'
+      - 'town.js'
       - 'CNAME'
+      - 'scripts/validate.cjs'
+      - '.github/workflows/validate.yml'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -21,7 +24,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+    permissions:
+      contents: read
+
   deploy:
+    needs: validate
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -29,10 +38,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Assemble static site (only the app + icons)
+      - name: Assemble static site (app, icons and town engine)
         run: |
           mkdir -p _site
-          cp index.html icons.js _site/
+          cp index.html icons.js town.js _site/
           [ -f CNAME ] && cp CNAME _site/ || true
 
       - name: Configure Pages
